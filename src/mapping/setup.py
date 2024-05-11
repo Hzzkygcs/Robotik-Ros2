@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'mapping'
+package_name = 'mapping.sh'
 
 setup(
     name=package_name,
@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'mapping = mapping.mapping:main',
+            'mapping.sh = mapping.sh.mapping.sh:main',
         ],
     },
 )
