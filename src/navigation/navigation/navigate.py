@@ -14,7 +14,11 @@ import numpy as np
 from navigation.models.raycasthit import RayCastHit
 
 
-ROBOT_BODY_RADIUS = 0.8
+ROBOT_BODY_RADIUS = 0.9
+
+# in POV from left (positive degree) to right (negative degree)
+ROBOT_SENSOR_LIMIT_START = math.pi/2
+ROBOT_SENSOR_LIMIT_END = -math.pi/2
 
 
 class Navigate(Node):
@@ -63,12 +67,12 @@ class Navigate(Node):
             range -= ROBOT_BODY_RADIUS
             angle = message.angle_min + message.angle_increment*index
             if range < self.raycast.range_min or range < 0:
-                ret.append(RayCastHit(0, angle))
+                ret.append(RayCastHit(0, angle, self.robot_pose))
                 continue
             if range > self.raycast.range_max:
-                ret.append(RayCastHit(message.range_max, angle))
+                ret.append(RayCastHit(message.range_max, angle, self.robot_pose))
                 continue
-            ret.append(RayCastHit(range, angle))
+            ret.append(RayCastHit(range, angle, self.robot_pose))
         # ret.sort(key=lambda x: x.range)
         ret.reverse()  # so that index 0 is the one on the left-most, and last index is the one on the right-most
         self.raycast = message
@@ -79,7 +83,13 @@ class Navigate(Node):
         # self.get_best_angle()
 
 
-    def get_raycast_index_from_relative_angle(self, relative_angle):  # 0 means the one in front of the robot. - in the right, + in the left
+    def get_raycast_index_from_relative_angle(self, _relative_angle):  # 0 means the one in front of the robot. - in the right, + in the left
+        relative_angle = _relative_angle
+        while relative_angle < self.raycast.angle_min:
+            relative_angle += 2*math.pi
+        while relative_angle > self.raycast.angle_max:
+            relative_angle -= 2*math.pi
+
         raycast_non_reversed_index = (relative_angle - self.raycast.angle_min)/self.raycast.angle_increment
         raycast_non_reversed_index = round(raycast_non_reversed_index)
         return len(self.raycast_results) - raycast_non_reversed_index
@@ -91,18 +101,33 @@ class Navigate(Node):
     def user_input(self, *args):
         hits = self.get_hits_bool_array()
         hits.insert(len(hits)//2, '9')
-        # TODO mark goal angle
 
+        if self.raycast_received:
+            goal_angle = self.goal_angle()
+            goal_angle_array_index = self.get_raycast_index_from_relative_angle(goal_angle)
+            hits.insert(goal_angle_array_index, "D")
+
+        recommended_angle = self.get_best_angle()
+        if (self.raycast_received and recommended_angle is not None and
+                self.raycast.angle_min < recommended_angle < self.raycast.angle_max):
+            recommended_angle_index = self.get_raycast_index_from_relative_angle(recommended_angle)
+            hits.insert(recommended_angle_index, "R")
+
+        # TODO mark goal angle
         a = list(map(lambda x: str({True: 1, False: 0}.get(x, x)), hits))
         print("".join(a))
         print(f"{self.raycast.angle_min + self.raycast.angle_increment*len(hits)}  {self.raycast.angle_max}")
 
 
     def get_best_angle(self, *args):  # None means you should go backward
+        if self.goal_is_reachable_without_obstacle_around:
+            return None
         hits = self.get_hits_bool_array()
         goal_angle = self.goal_angle()
-        if not self.raycast_received:
+        if not self.raycast_received or not self.robot_pose_received:
             return None
+        goal_is_in_left = goal_angle > math.pi/17
+        goal_is_in_right = goal_angle < math.pi/17
 
         goal_angle_array_index = self.get_raycast_index_from_relative_angle(goal_angle)
         if goal_angle_array_index < 0 or goal_angle_array_index >= len(hits):
@@ -114,16 +139,36 @@ class Navigate(Node):
         angle = None
         if recommended_angle_index is not None:
             angle = recommended_angle_index[0]
+            middle_angle, unbounded_left, unbounded_right, start, end = get_the_middle_index(hits, angle, False)
+
+            obstacle_left = self.raycast_results[start].relative_position(self.robot_pose)
+            obstacle_right = self.raycast_results[end].relative_position(self.robot_pose)
+
+            space_width = obstacle_left.distance_to(obstacle_right)
+            if not unbounded_left and not unbounded_right:
+                # if the space is enclosed by obstacle on the left and the right and not wide, then
+                # pick the middle. (Because if it's wide enough, then just go to the goal_point)
+                angle = middle_angle
+                if goal_is_in_left:
+                    angle = start+(end-start)*4/5 + 8  # +x untuk jaga2
+                elif goal_is_in_right:
+                    angle = start+(end-start)*1/5 - 8
+            elif goal_is_in_left and angle+5<len(hits) and hits[angle+5] is not True:  # is not pure True
+                angle += 5  # go to slightly right because big chances obstacle are at the left
+            elif goal_is_in_right and angle-5>=0 and hits[angle-5] is not True:
+                angle -= 5  # go to slightly left
+
+
+
         if angle is None:
             return None
         ret = self.get_relative_angle_from_raycast_index(angle)
+
         if random.randint(1, 100) < 15:  # so it's not too laggy
             self.get_logger().info(f'Recommended angle: {math.degrees(ret)}:{recommended_angle_index} '
                                    f'goal={math.degrees(goal_angle)}:{goal_angle_array_index}'
                                    f' len={len(hits)}')
         return ret
-
-
 
     def get_hits_bool_array(self) -> list[bool]:
         ret = []
@@ -132,7 +177,7 @@ class Navigate(Node):
         prev_raycast = self.raycast_results[0]
 
         # any False will be non-pure True if they're within `dilation_radius`-radius to a pure-True (pure object hit)
-        dilation_radius = 15
+        dilation_radius = 0
         for index,raycast in enumerate(self.raycast_results):
             is_hit = self.obstacle_will_hit(raycast)
             value = is_hit
@@ -147,8 +192,14 @@ class Navigate(Node):
             ret.append(value)
             assert prev_raycast.angle >= raycast.angle
             prev_raycast = raycast
+        sensor_start_index = self.get_raycast_index_from_relative_angle(ROBOT_SENSOR_LIMIT_START)
+        sensor_end_index = self.get_raycast_index_from_relative_angle(ROBOT_SENSOR_LIMIT_END)
+        for i in range(sensor_start_index):
+            ret[i] = NonPureTrue('|')
+        for i in range(sensor_end_index, len(ret)):
+            ret[i] = NonPureTrue('|')
         return ret
-        return list(map(bool, ret))
+
 
 
     # obstacle angle is in radians, starts from 0 for right, pi/2 for straight in front of the robot, and pi for left
@@ -159,11 +210,35 @@ class Navigate(Node):
         y_relative = obstacle_distance * math.sin(obstacle_angle - goal_angle + math.pi/2)
         y_target_relative = self.goal_distance()
 
-        if y_relative < -2*ROBOT_BODY_RADIUS or y_relative > raycasthit.range+2*ROBOT_BODY_RADIUS:
+        if y_relative < -ROBOT_BODY_RADIUS or y_relative > raycasthit.range+ROBOT_BODY_RADIUS:
             return False
-        if math.fabs(x_relative) <= 2*ROBOT_BODY_RADIUS:
+        if math.fabs(x_relative) <= ROBOT_BODY_RADIUS:
             return True
         return False
+
+    @property
+    def goal_is_reachable_without_obstacle_around(self):
+        if not self.robot_pose_received or not self.raycast_received:
+            return True
+        goal_angle_relative_to_robot_pov = self.goal_angle(True)
+
+        if goal_angle_relative_to_robot_pov < self.raycast.angle_min or goal_angle_relative_to_robot_pov > self.raycast.angle_max:
+            return False
+        return self.angle_is_reachable_without_obstacle_around(goal_angle_relative_to_robot_pov,
+                                                               self.goal_distance())
+
+    def angle_is_reachable_without_obstacle_around(self, goal_angle, goal_distance, check_degree_to_left_right=10):
+        if not self.raycast_received:
+            return True
+        target_angle_index = self.get_raycast_index_from_relative_angle(goal_angle)
+        rads_degree = math.radians(check_degree_to_left_right)
+        angle_index = math.ceil(rads_degree / self.raycast.angle_increment)
+        raycasts = self.raycast_results
+        for index in range(max(0,target_angle_index-angle_index), min(target_angle_index+angle_index, len(raycasts))):
+            if raycasts[index].range <= goal_distance:
+                return False
+        return True
+
 
 
     @property
@@ -203,12 +278,12 @@ class Navigate(Node):
         gdistance = np.sqrt(dx**2 + dy**2)
         return gdistance
 
-    # goal angle relative to current robot position, but NOT relative to direction its facing
-    def goal_angle(self, relative=True, angle_range_start=-math.pi, angle_range_end=math.pi+0.001):
+
+    def goal_angle(self, relative_to_pov=True, angle_range_start=-math.pi, angle_range_end=math.pi + 0.001):
         dx = self._goal_point.x - self.robot_pose.x
         dy = self._goal_point.y - self.robot_pose.y
         goal_angle = np.arctan2(dy, dx)
-        if relative:
+        if relative_to_pov:
             # goal_angle -= math.pi/2
             goal_angle -= self.robot_pose.theta
         while goal_angle < angle_range_start:
@@ -255,7 +330,7 @@ def find_closest_value(array: list, start_index: int, value_to_find) -> Optional
 
     left_exist = True
     right_exist = True
-    distance = 0
+    distance = 3
     ret = []
     while left_exist and right_exist:
         if start_index-distance < 0:
@@ -272,15 +347,29 @@ def find_closest_value(array: list, start_index: int, value_to_find) -> Optional
     return None
 
 
+def get_the_middle_index(array: list, start_index: int, value_to_find):
+    assert array[start_index] == value_to_find
+    start = start_index
+    while start-1 >= 0 and array[start-1] == value_to_find:
+        start -= 1
+    touch_left_index = (start == 0)
+    end = start_index
+    while end+1 < len(array) and array[end+1] == value_to_find:
+        end += 1
+    touch_right_index = (end == len(array)-1)
+    mid = (start+end)//2
+    return mid, touch_left_index, touch_right_index, start, end
+
+
 
 class NonPureTrue:
-    def __init__(self):
-        pass
+    def __init__(self, repr='-'):
+        self.repr = repr
 
     def __bool__(self):
         return True
     def __repr__(self):
-        return '-'
+        return self.repr
 NonPureTrue.value = NonPureTrue()
 
 

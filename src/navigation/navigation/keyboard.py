@@ -33,6 +33,7 @@ class Keyboard(Node):
         self.set_stdscr_timeout()
         self.keyboard_input_stdscr.addstr(1, 0, "Press W to go Up, S to go down, A to go left, D to go right, ")
         self.keyboard_input_stdscr.addstr(2, 0, "or Q to quit. Press i for something special")
+        self.keyboard_input_stdscr.addstr(4, 20, 'Waiting current_goal_point to be intiialized')
         self.set_status("")
         self.already_stopped = False
         self.movement_distance = 0.3
@@ -159,6 +160,7 @@ class Keyboard(Node):
 
 def main(args=None):
     global screen  # TODO move to constructor params but idk how
+    print("Loading...")
     screen = curses.initscr()
     curses.cbreak()
     screen.keypad(1)
