@@ -11,7 +11,8 @@ import time
 from std_msgs.msg import String
 import numpy as np
 
-from navigation.models.movement_override import MovementOverride, BackwardMovementOverride, ForwardMovementOverride, NopMovementOverride
+from navigation.models.movement_override import (MovementOverride, BackwardMovementOverride,
+                                                 ForwardMovementOverride, NopMovementOverride, RotateTowardGoalOverride)
 from navigation.models.raycasthit import RayCastHit
 
 
@@ -111,7 +112,7 @@ class Navigate(Node):
             hits.insert(goal_angle_array_index, "D")
 
         recommended_angle = self.get_best_angle_to_avoid_obstacles()
-        if (self.raycast_received and recommended_angle is not None and
+        if (self.raycast_received and isinstance(recommended_angle, float) and
                 self.raycast.angle_min < recommended_angle < self.raycast.angle_max):
             recommended_angle_index = self.get_raycast_index_from_relative_angle(recommended_angle)
             hits.insert(recommended_angle_index, "R")
@@ -122,7 +123,7 @@ class Navigate(Node):
         print(f"{self.raycast.angle_min + self.raycast.angle_increment*len(hits)}  {self.raycast.angle_max}")
 
 
-    def get_best_angle_to_avoid_obstacles(self, *args):  # None means you should go backward
+    def get_best_angle_to_avoid_obstacles(self, *args):  # None means just use default algo. Normally returns float
         if self.goal_is_reachable_without_obstacle_around:
             if random.randint(1,100) < 10:
                 self.get_logger().info('Goal is reachable without obstacle around')
@@ -139,7 +140,7 @@ class Navigate(Node):
             if random.randint(1, 100) < 15:  # so it's not too laggy
                 self.get_logger().info(f'angle none 1 - {goal_angle_array_index}/{len(hits)} {math.degrees(goal_angle)} {math.degrees(self.raycast.angle_min)}'
                                        f' {math.degrees(self.raycast.angle_max)}')
-            return None  # go backward, the goal is not in raycast angle radius
+            return GoalIsOutsideRadarRange()  # go backward, the goal is not in raycast angle radius
         recommended_angle_index = find_closest_value(hits, goal_angle_array_index, False)
         if recommended_angle_index is None:
             return None
@@ -335,13 +336,17 @@ class Navigate(Node):
             self.user_input()
         # best_angle = None
 
-        dx = self.goal_point.x - self.robot_pose.x
-        dy = self.goal_point.y - self.robot_pose.y
-        distance = np.sqrt(dx**2 + dy**2)
-        goal_angle = np.arctan2(dy, dx)
+        distance, goal_angle = self.get_goal_polar_coord_relative_to_robot_pos()
 
         theta = best_angle
-        if best_angle is None:
+        if isinstance(best_angle, GoalIsOutsideRadarRange):
+            self.get_logger().info('Goal Point is at the back. Doing rotation movement override...')
+            self.movement_override = RotateTowardGoalOverride(lambda: self.robot_pose,
+                                                              lambda: self.get_goal_polar_coord_relative_to_robot_pos()[1],
+                                                              self.publisher_cmd_vel.publish,
+                                                              2.5)
+            return
+        elif best_angle is None:
             theta = goal_angle - self.robot_pose.theta
         elif self.handle_robot_should_go_backward():
             return
@@ -356,6 +361,13 @@ class Navigate(Node):
         cmd_vel.angular.z = 2.0 * theta
         self.publisher_cmd_vel.publish(cmd_vel)
         return True
+
+    def get_goal_polar_coord_relative_to_robot_pos(self):
+        dx = self.goal_point.x - self.robot_pose.x
+        dy = self.goal_point.y - self.robot_pose.y
+        distance = np.sqrt(dx**2 + dy**2)
+        goal_angle = np.arctan2(dy, dx)
+        return distance, goal_angle
 
 def find_closest_value(array: list, start_index: int, value_to_find) -> Optional[list[int]]:
     assert not start_index < 0 or start_index >= len(array)
@@ -391,6 +403,11 @@ def get_the_middle_index(array: list, start_index: int, value_to_find):
     touch_right_index = (end == len(array)-1)
     mid = (start+end)//2
     return mid, touch_left_index, touch_right_index, start, end
+
+
+
+class GoalIsOutsideRadarRange():
+    pass
 
 
 

@@ -17,6 +17,9 @@ class MovementOverride:
     def get_twist(self):
         raise NotImplementedError()
 
+    def get_twist_of_next_override(self):
+        return self.next_override() if self.next_override is not None else None
+
     @staticmethod
     def chain(*movement_overrides: list[MovementOverride]):
         if len(movement_overrides) == 0:
@@ -47,7 +50,7 @@ class BackwardMovementOverride(MovementOverride):
     @property
     def get_twist(self):
         if not self.is_valid:
-            return self.next_override.get_twist if self.next_override is not None else None
+            return self.get_twist_of_next_override()
         ret = Twist()
         theta = math.radians(-DEGREE if self.obstacle_at_left else DEGREE) * 3
         ret.linear.y = -MOVEMENT_SPEED
@@ -64,9 +67,35 @@ class ForwardMovementOverride(MovementOverride):
     @property
     def get_twist(self):
         if not self.is_valid:
-            return self.next_override() if self.next_override is not None else None
+            return self.get_twist_of_next_override()
         ret = Twist()
         theta = math.radians(-2*DEGREE if self.obstacle_at_left else 2 * DEGREE)
         ret.linear.y = MOVEMENT_SPEED
         ret.angular.z = 2.0 * theta
         return ret
+
+
+class RotateTowardGoalOverride(MovementOverride):
+    def __init__(self, get_robot_pose_func, get_goal_angle_func, publish_result, end_duration_relative=3, next_override: MovementOverride=None):
+        super().__init__(end_duration_relative, next_override)
+        self.get_robot_pose_func = get_robot_pose_func
+        self.get_goal_angle_func = get_goal_angle_func
+        self.publish_result = publish_result
+
+
+
+    @property
+    def get_twist(self):
+        if not self.is_valid:
+            return self.get_twist_of_next_override()
+        theta = self.get_goal_angle_func() - self.get_robot_pose_func().theta
+
+        while theta > math.pi:
+            theta -= 2*math.pi
+        while theta < -math.pi:
+            theta += 2*math.pi
+
+        cmd_vel = Twist()
+        cmd_vel.linear.y = 0.4
+        cmd_vel.angular.z = 2.0 * theta
+        self.publish_result(cmd_vel)
