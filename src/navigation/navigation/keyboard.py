@@ -5,6 +5,7 @@ from geometry_msgs.msg import Pose2D, Point, Twist
 import curses
 import numpy as np
 import time
+from std_msgs.msg import String
 
 
 class Keyboard(Node):
@@ -18,6 +19,11 @@ class Keyboard(Node):
         self.publisher_goal_point = self.create_publisher(
             Point,
             '/goal_point',
+            10)
+
+        self.publisher_user_string_input = self.create_publisher(
+            String,
+            '/user_string_input',  # for debugging purpose only
             10)
         timer_period_in_seconds = 0.2
         self.timer = self.create_timer(timer_period_in_seconds, self.update_goal_point_from_keyboard)
@@ -43,7 +49,7 @@ class Keyboard(Node):
             return
         self.robot_is_moving = False
         self.current_goal_point = [self.position.x, self.position.y]
-        self.keyboard_input_stdscr.addstr(3, 20, 'current_goal_point intiialized')
+        self.keyboard_input_stdscr.addstr(4, 20, 'current_goal_point intiialized')
 
     def update_goal_point_from_keyboard(self):
         if self.current_goal_point is None:
@@ -75,6 +81,13 @@ class Keyboard(Node):
             self.manual_input_mode(self.manual_input_mode_callback, msg="Set target goal relative to current robot in `x,y` format")
             stop = True
             self.already_stopped = True  # do not send "stop goal_point" until the next keypress
+        elif key == ord('p'):
+            def func(data: bytes):
+                ret = String()
+                ret.data = data.decode()
+                self.publisher_user_string_input.publish(ret)
+            self.manual_input_mode(func, msg="Type your input (max 15 chars)")
+            stop = True
         else:
             stop = True
             self.stop()
@@ -84,7 +97,7 @@ class Keyboard(Node):
 
         curses.flushinp()
         self.keyboard_input_stdscr.clrtoeol()
-        self.keyboard_input_stdscr.addstr(8, 20, str(int(time.time()) - self.start_time) + " " + str(key))
+        # self.keyboard_input_stdscr.addstr(8, 20, str(int(time.time()) - self.start_time) + " " + str(key))
         self.keyboard_input_stdscr.refresh()
 
     def manual_input_mode(self, callback, msg=''):
@@ -93,12 +106,12 @@ class Keyboard(Node):
         self.keyboard_input_stdscr.clear()
         self.keyboard_input_stdscr.addstr(3, 0, msg)
         user_input = self.keyboard_input_stdscr.getstr(0,0, 15)
+        self.keyboard_input_stdscr.clear()
         callback(user_input)
         self.set_stdscr_timeout()
         self.user_input_mode = False
 
     def manual_input_mode_callback(self, _user_input: bytes):
-        self.keyboard_input_stdscr.clear()
         user_input = _user_input.decode()
         self.keyboard_input_stdscr.addstr(9, 20, f"result: {user_input}")
         if ',' not in user_input:

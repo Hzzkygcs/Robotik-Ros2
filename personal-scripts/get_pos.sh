@@ -5,4 +5,4 @@ source ~/.profile
 eval "$(cat ~/.bashrc | tail -n +10)"
 
 
-ros2 run visualization grid_visualizer
+ros2 topic echo /robot_pose
