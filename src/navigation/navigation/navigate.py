@@ -11,10 +11,12 @@ import time
 from std_msgs.msg import String
 import numpy as np
 
+from navigation.models.movement_override import MovementOverride, BackwardMovementOverride, ForwardMovementOverride, NopMovementOverride
 from navigation.models.raycasthit import RayCastHit
 
 
-ROBOT_BODY_RADIUS = 0.9
+OBSTACLE_DILATION_RADIUS = 0.9
+LASER_REDUCTION = 0.2  # due to estimated body radius
 
 # in POV from left (positive degree) to right (negative degree)
 ROBOT_SENSOR_LIMIT_START = math.pi/2
@@ -33,6 +35,7 @@ class Navigate(Node):
         self._goal_point = Point()
         self.robot_pose_received = False
         self.goal_point_received = False
+        self.movement_override = NopMovementOverride()
         self.get_logger().info('Running')
 
         self.subscription_scan = self.create_subscription(
@@ -64,7 +67,7 @@ class Navigate(Node):
     def on_receive_laser_scan(self, message: LaserScan):  # angle in rads, 0=front, -90=right, +90=left
         ret = []
         for index, range in enumerate(self.raycast.ranges):
-            range -= ROBOT_BODY_RADIUS
+            range -= LASER_REDUCTION
             angle = message.angle_min + message.angle_increment*index
             if range < self.raycast.range_min or range < 0:
                 ret.append(RayCastHit(0, angle, self.robot_pose))
@@ -107,7 +110,7 @@ class Navigate(Node):
             goal_angle_array_index = self.get_raycast_index_from_relative_angle(goal_angle)
             hits.insert(goal_angle_array_index, "D")
 
-        recommended_angle = self.get_best_angle()
+        recommended_angle = self.get_best_angle_to_avoid_obstacles()
         if (self.raycast_received and recommended_angle is not None and
                 self.raycast.angle_min < recommended_angle < self.raycast.angle_max):
             recommended_angle_index = self.get_raycast_index_from_relative_angle(recommended_angle)
@@ -119,15 +122,17 @@ class Navigate(Node):
         print(f"{self.raycast.angle_min + self.raycast.angle_increment*len(hits)}  {self.raycast.angle_max}")
 
 
-    def get_best_angle(self, *args):  # None means you should go backward
+    def get_best_angle_to_avoid_obstacles(self, *args):  # None means you should go backward
         if self.goal_is_reachable_without_obstacle_around:
+            if random.randint(1,100) < 10:
+                self.get_logger().info('Goal is reachable without obstacle around')
             return None
         hits = self.get_hits_bool_array()
         goal_angle = self.goal_angle()
         if not self.raycast_received or not self.robot_pose_received:
             return None
-        goal_is_in_left = goal_angle > math.pi/17
-        goal_is_in_right = goal_angle < math.pi/17
+        goal_is_in_left = goal_angle > math.pi/10
+        goal_is_in_right = goal_angle < math.pi/10
 
         goal_angle_array_index = self.get_raycast_index_from_relative_angle(goal_angle)
         if goal_angle_array_index < 0 or goal_angle_array_index >= len(hits):
@@ -136,7 +141,9 @@ class Navigate(Node):
                                        f' {math.degrees(self.raycast.angle_max)}')
             return None  # go backward, the goal is not in raycast angle radius
         recommended_angle_index = find_closest_value(hits, goal_angle_array_index, False)
-        angle = None
+        if recommended_angle_index is None:
+            return None
+
         if recommended_angle_index is not None:
             angle = recommended_angle_index[0]
             middle_angle, unbounded_left, unbounded_right, start, end = get_the_middle_index(hits, angle, False)
@@ -150,18 +157,14 @@ class Navigate(Node):
                 # pick the middle. (Because if it's wide enough, then just go to the goal_point)
                 angle = middle_angle
                 if goal_is_in_left:
-                    angle = start+(end-start)*4/5 + 8  # +x untuk jaga2
+                    angle = start+(end-start)*1/2  # +x untuk jaga2
                 elif goal_is_in_right:
-                    angle = start+(end-start)*1/5 - 8
+                    angle = start+(end-start)*1/2
             elif goal_is_in_left and angle+5<len(hits) and hits[angle+5] is not True:  # is not pure True
                 angle += 5  # go to slightly right because big chances obstacle are at the left
             elif goal_is_in_right and angle-5>=0 and hits[angle-5] is not True:
                 angle -= 5  # go to slightly left
 
-
-
-        if angle is None:
-            return None
         ret = self.get_relative_angle_from_raycast_index(angle)
 
         if random.randint(1, 100) < 15:  # so it's not too laggy
@@ -177,7 +180,7 @@ class Navigate(Node):
         prev_raycast = self.raycast_results[0]
 
         # any False will be non-pure True if they're within `dilation_radius`-radius to a pure-True (pure object hit)
-        dilation_radius = 0
+        dilation_radius = 20
         for index,raycast in enumerate(self.raycast_results):
             is_hit = self.obstacle_will_hit(raycast)
             value = is_hit
@@ -210,9 +213,9 @@ class Navigate(Node):
         y_relative = obstacle_distance * math.sin(obstacle_angle - goal_angle + math.pi/2)
         y_target_relative = self.goal_distance()
 
-        if y_relative < -ROBOT_BODY_RADIUS or y_relative > raycasthit.range+ROBOT_BODY_RADIUS:
+        if y_relative < -OBSTACLE_DILATION_RADIUS or y_relative > raycasthit.range+OBSTACLE_DILATION_RADIUS:
             return False
-        if math.fabs(x_relative) <= ROBOT_BODY_RADIUS:
+        if math.fabs(x_relative) <= OBSTACLE_DILATION_RADIUS:
             return True
         return False
 
@@ -292,7 +295,34 @@ class Navigate(Node):
             goal_angle -= math.pi*2
         return goal_angle
 
+    def handle_robot_should_go_backward(self):
+        if not self.raycast_received:
+            return False
+        min_distance = float('inf')
+        obstacle_left = None
+        for raycast in self.raycast_results:
+            if raycast.range < min_distance:
+                min_distance = raycast.range
+                obstacle_left = raycast.angle > 0
+        if min_distance > 0.15:
+            return False
+        self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'} with dist {min_distance}")
+
+        expire_duration = 0
+        self.movement_override = MovementOverride.chain(
+            BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1.5),
+            ForwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 3.5),
+        )
+        return True
+
+
     def navigate(self):
+        override_twist = self.movement_override.get_twist
+        if override_twist is not None:
+            self.publisher_cmd_vel.publish(override_twist)
+            return
+
+
         distance = float('inf')
         if self.goal_point is None:
             cmd_vel = Twist()
@@ -300,7 +330,7 @@ class Navigate(Node):
             cmd_vel.angular.z = 0.0
             self.publisher_cmd_vel.publish(cmd_vel)
             return True
-        best_angle = self.get_best_angle()
+        best_angle = self.get_best_angle_to_avoid_obstacles()
         if random.randint(1,100) < 10:
             self.user_input()
         # best_angle = None
@@ -313,6 +343,8 @@ class Navigate(Node):
         theta = best_angle
         if best_angle is None:
             theta = goal_angle - self.robot_pose.theta
+        elif self.handle_robot_should_go_backward():
+            return
 
         while theta > np.pi:
             theta -= 2*np.pi
@@ -332,7 +364,7 @@ def find_closest_value(array: list, start_index: int, value_to_find) -> Optional
     right_exist = True
     distance = 3
     ret = []
-    while left_exist and right_exist:
+    while left_exist or right_exist:  # was AND
         if start_index-distance < 0:
             left_exist = False
         if start_index+distance >= len(array):

@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import time, math
+from geometry_msgs.msg import Twist
+
+
+class MovementOverride:
+    def __init__(self, end_duration_relative, next_override: MovementOverride=None):
+        self.end_duration = int(time.time()) + end_duration_relative
+        self.next_override = next_override
+
+    @property
+    def is_valid(self):
+        return int(time.time()) < self.end_duration
+
+    @property
+    def get_twist(self):
+        raise NotImplementedError()
+
+    @staticmethod
+    def chain(*movement_overrides: list[MovementOverride]):
+        if len(movement_overrides) == 0:
+            return None
+        for i in range(len(movement_overrides)):
+            if i+1 >= len(movement_overrides):
+                break
+            movement_overrides[i].next_override = movement_overrides[i+1]
+        return movement_overrides[0]
+
+
+class NopMovementOverride(MovementOverride):
+    def __init__(self, _ignored=None, next_override: MovementOverride=None):
+        super().__init__(-1)
+    @property
+    def get_twist(self):
+        return
+
+DEGREE = 10
+MOVEMENT_SPEED = 0.4
+
+class BackwardMovementOverride(MovementOverride):
+    def __init__(self, obstacle_on_left: bool, expire_duration=3, next_override: MovementOverride=None):
+        super().__init__(expire_duration)
+        self.next_override = next_override
+        self.obstacle_at_left = obstacle_on_left
+
+    @property
+    def get_twist(self):
+        if not self.is_valid:
+            return self.next_override.get_twist if self.next_override is not None else None
+        ret = Twist()
+        theta = math.radians(-DEGREE if self.obstacle_at_left else DEGREE) * 3
+        ret.linear.y = -MOVEMENT_SPEED
+        ret.angular.z = 2.0 * theta
+        return ret
+
+
+class ForwardMovementOverride(MovementOverride):
+    def __init__(self, obstacle_on_left: bool, end_duration_relative=3, next_override: MovementOverride=None):
+        super().__init__(end_duration_relative)
+        self.next_override = next_override
+        self.obstacle_at_left = obstacle_on_left
+
+    @property
+    def get_twist(self):
+        if not self.is_valid:
+            return self.next_override() if self.next_override is not None else None
+        ret = Twist()
+        theta = math.radians(-2*DEGREE if self.obstacle_at_left else 2 * DEGREE)
+        ret.linear.y = MOVEMENT_SPEED
+        ret.angular.z = 2.0 * theta
+        return ret

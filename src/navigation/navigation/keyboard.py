@@ -40,6 +40,7 @@ class Keyboard(Node):
         self.exit_signal = False
         self.start_time = int(time.time())
         self.user_input_mode = False
+        self.keep_broadcast = False
 
     def set_stdscr_timeout(self):
         self.keyboard_input_stdscr.timeout(400)
@@ -81,6 +82,7 @@ class Keyboard(Node):
         elif key == ord('i'):
             self.manual_input_mode(self.manual_input_mode_callback, msg="Set target goal relative to current robot in `x,y` format")
             stop = True
+            self.keep_broadcast = True
             self.already_stopped = True  # do not send "stop goal_point" until the next keypress
         elif key == ord('p'):
             def func(data: bytes):
@@ -93,6 +95,7 @@ class Keyboard(Node):
             stop = True
             self.stop()
         if not stop:
+            self.keep_broadcast = False
             self.already_stopped = False
             self.publish_goal_point()
 
@@ -134,6 +137,8 @@ class Keyboard(Node):
 
     def stop(self):
         if self.already_stopped:
+            if self.keep_broadcast:
+                self.publish_goal_point()
             return
         self.publish_goal_point()
         self.set_status("Stop")
