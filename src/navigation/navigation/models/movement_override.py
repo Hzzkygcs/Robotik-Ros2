@@ -18,7 +18,7 @@ class MovementOverride:
         raise NotImplementedError()
 
     def get_twist_of_next_override(self):
-        return self.next_override() if self.next_override is not None else None
+        return self.next_override.get_twist if self.next_override is not None else None
 
     @staticmethod
     def chain(*movement_overrides: list[MovementOverride]):
@@ -98,4 +98,4 @@ class RotateTowardGoalOverride(MovementOverride):
         cmd_vel = Twist()
         cmd_vel.linear.y = 0.4
         cmd_vel.angular.z = 2.0 * theta
-        self.publish_result(cmd_vel)
+        return cmd_vel

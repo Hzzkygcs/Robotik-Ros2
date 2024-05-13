@@ -269,12 +269,15 @@ class Navigate(Node):
 
     @property
     def goal_point(self) -> Point:
+        return self._goal_point
+    @property
+    def goal_arrived(self):
         dx = self._goal_point.x - self.robot_pose.x
         dy = self._goal_point.y - self.robot_pose.y
         distance = np.sqrt(dx**2 + dy**2)
         if distance < 0.1:
-            return None
-        return self._goal_point
+            return True
+        return False
 
     def goal_distance(self):  # goal angle relative to current robot position
         dx = self._goal_point.x - self.robot_pose.x
@@ -305,7 +308,7 @@ class Navigate(Node):
             if raycast.range < min_distance:
                 min_distance = raycast.range
                 obstacle_left = raycast.angle > 0
-        if min_distance > 0.15:
+        if min_distance > 0.10:
             return False
         self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'} with dist {min_distance}")
 
@@ -325,7 +328,7 @@ class Navigate(Node):
 
 
         distance = float('inf')
-        if self.goal_point is None:
+        if self.goal_arrived:
             cmd_vel = Twist()
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0
@@ -344,7 +347,7 @@ class Navigate(Node):
             self.movement_override = RotateTowardGoalOverride(lambda: self.robot_pose,
                                                               lambda: self.get_goal_polar_coord_relative_to_robot_pos()[1],
                                                               self.publisher_cmd_vel.publish,
-                                                              2.5)
+                                                              3)
             return
         elif best_angle is None:
             theta = goal_angle - self.robot_pose.theta
