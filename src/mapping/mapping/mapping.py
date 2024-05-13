@@ -88,55 +88,55 @@ class GridMapBuilder(Node):
         # Publish the occupancy grid
         self.publish_grid_map_multilayer_grid()
 
-    def listener_scan(self, msg):  # old one, unused
-        # Calculate occupied points from laser scan
-        valid_distances = np.array(msg.ranges) < msg.range_max
-        distances = np.array(msg.ranges)[valid_distances]
-        angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
-        x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
-        y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
+    # def listener_scan(self, msg):  # old one, unused
+    #     # Calculate occupied points from laser scan
+    #     valid_distances = np.array(msg.ranges) < msg.range_max
+    #     distances = np.array(msg.ranges)[valid_distances]
+    #     angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
+    #     x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
+    #     y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
+    #
+    #
+    #     robot_grid_x = int((self.current_pose.x / self.resolution) + (self.grid_size_x / 2))
+    #     robot_grid_y = int((self.current_pose.y / self.resolution) + (self.grid_size_y / 2))
+    #
+    #     # Convert to grid coordinates
+    #     grid_x = np.floor((x_coords / self.resolution) + (self.grid_size_x / 2)).astype(int)
+    #     grid_y = np.floor((y_coords / self.resolution) + (self.grid_size_y / 2)).astype(int)
+    #
+    #     for end_x, end_y in zip(grid_x, grid_y):
+    #         # Use Bresenham's algorithm to update cells in line of sight
+    #         for line_x, line_y in self.bresenham_line(robot_grid_x, robot_grid_y, end_x, end_y):
+    #             # Check bounds and mark as free if within grid
+    #             if (0 <= line_x < self.grid_map.shape[1]) and (0 <= line_y < self.grid_map.shape[0]):
+    #                 self.grid_map[line_y, line_x] = 255
+    #                 temp = self.grid_map[line_y, line_x]
+    #
+    #                 # Mark the end point as occupied
+    #         if (0 <= end_x < self.grid_map.shape[1]) and (0 <= end_y < self.grid_map.shape[0]):
+    #             self.grid_map[end_y, end_x] = 100
+    #
+    #     # Publish the occupancy grid
+    #     self.publish_grid_map()
 
-        
-        robot_grid_x = int((self.current_pose.x / self.resolution) + (self.grid_size_x / 2))
-        robot_grid_y = int((self.current_pose.y / self.resolution) + (self.grid_size_y / 2))
-        
-        # Convert to grid coordinates
-        grid_x = np.floor((x_coords / self.resolution) + (self.grid_size_x / 2)).astype(int)
-        grid_y = np.floor((y_coords / self.resolution) + (self.grid_size_y / 2)).astype(int)
-
-        for end_x, end_y in zip(grid_x, grid_y):
-            # Use Bresenham's algorithm to update cells in line of sight
-            for line_x, line_y in self.bresenham_line(robot_grid_x, robot_grid_y, end_x, end_y):
-                # Check bounds and mark as free if within grid
-                if (0 <= line_x < self.grid_map.shape[1]) and (0 <= line_y < self.grid_map.shape[0]):
-                    self.grid_map[line_y, line_x] = 255
-                    temp = self.grid_map[line_y, line_x]
-
-                    # Mark the end point as occupied
-            if (0 <= end_x < self.grid_map.shape[1]) and (0 <= end_y < self.grid_map.shape[0]):
-                self.grid_map[end_y, end_x] = 100
-
-        # Publish the occupancy grid
-        self.publish_grid_map()
-
-    def bresenham_line(self, x0, y0, x1, y1):
-        """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""
-        dx = abs(x1 - x0)
-        dy = -abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx + dy
-        while True:
-            yield x0, y0
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy
-                x0 += sx
-            if e2 <= dx:
-                err += dx
-                y0 += sy
+    # def bresenham_line(self, x0, y0, x1, y1):
+    #     """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""
+    #     dx = abs(x1 - x0)
+    #     dy = -abs(y1 - y0)
+    #     sx = 1 if x0 < x1 else -1
+    #     sy = 1 if y0 < y1 else -1
+    #     err = dx + dy
+    #     while True:
+    #         yield x0, y0
+    #         if x0 == x1 and y0 == y1:
+    #             break
+    #         e2 = 2 * err
+    #         if e2 >= dy:
+    #             err += dy
+    #             x0 += sx
+    #         if e2 <= dx:
+    #             err += dx
+    #             y0 += sy
 
     def publish_grid_map_multilayer_grid(self):
         try:
@@ -155,18 +155,18 @@ class GridMapBuilder(Node):
             raise e
         print('Occupancy map published')
 
-    def publish_grid_map(self):  # old one, unused
-        grid_msg = OccupancyGrid()
-        grid_msg.header.stamp = self.get_clock().now().to_msg()
-        grid_msg.header.frame_id = "map"
-        grid_msg.info = MapMetaData()
-        grid_msg.info.resolution = self.resolution
-        grid_msg.info.width = self.grid_map.shape[1]
-        grid_msg.info.height = self.grid_map.shape[0]
-        grid_msg.info.origin = Pose()
-        grid_msg.data = self.grid_map.ravel().tolist()
-        self.publisher_map.publish(grid_msg)
-        print('Occupancy map published')
+    # def publish_grid_map(self):  # old one, unused
+    #     grid_msg = OccupancyGrid()
+    #     grid_msg.header.stamp = self.get_clock().now().to_msg()
+    #     grid_msg.header.frame_id = "map"
+    #     grid_msg.info = MapMetaData()
+    #     grid_msg.info.resolution = self.resolution
+    #     grid_msg.info.width = self.grid_map.shape[1]
+    #     grid_msg.info.height = self.grid_map.shape[0]
+    #     grid_msg.info.origin = Pose()
+    #     grid_msg.data = self.grid_map.ravel().tolist()
+    #     self.publisher_map.publish(grid_msg)
+    #     print('Occupancy map published')
 
 def main(args=None):
     rclpy.init(args=args)
