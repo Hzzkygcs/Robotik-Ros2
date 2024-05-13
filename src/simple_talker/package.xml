@@ -4,7 +4,7 @@
   <name>simple_talker</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="alifwr98@gmail.com">alif</maintainer>
+  <maintainer email="immanuel01@ui.ac.id">alif</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
