@@ -313,9 +313,11 @@ class Navigate(Node):
         self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'} with dist {min_distance}")
 
         expire_duration = 0
+        goal_is_in_left = self.goal_angle() > 0
         self.movement_override = MovementOverride.chain(
             BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1.5),
-            ForwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 3.5),
+            ForwardMovementOverride(not obstacle_left, expire_duration:= expire_duration + 1),
+            ForwardMovementOverride(goal_is_in_left, expire_duration:= expire_duration + 2.5),
         )
         return True
 
@@ -325,7 +327,6 @@ class Navigate(Node):
         if override_twist is not None:
             self.publisher_cmd_vel.publish(override_twist)
             return
-
 
         distance = float('inf')
         if self.goal_arrived:
@@ -349,10 +350,11 @@ class Navigate(Node):
                                                               self.publisher_cmd_vel.publish,
                                                               3)
             return
-        elif best_angle is None:
-            theta = goal_angle - self.robot_pose.theta
         elif self.handle_robot_should_go_backward():
             return
+        elif best_angle is None:
+            theta = goal_angle - self.robot_pose.theta
+
 
         while theta > np.pi:
             theta -= 2*np.pi
