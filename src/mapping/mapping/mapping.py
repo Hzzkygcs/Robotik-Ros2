@@ -7,6 +7,9 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import math
 
+from src.mapping.mapping.models.multilayergrid import MultilayerGrid
+
+
 class GridMapBuilder(Node):
     def __init__(self):
         super().__init__('grid_map_builder')
@@ -39,6 +42,8 @@ class GridMapBuilder(Node):
         
         # Current pose of the robot
         self.current_pose = Pose2D()
+        self.multilayer_grid = MultilayerGrid(
+            (-5.1, -5.1), (5.1, 5.1), self.resolution, lambda: -1, 10)
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -58,6 +63,7 @@ class GridMapBuilder(Node):
         angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
         x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
         y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
+
         
         robot_grid_x = int((self.current_pose.x / self.resolution) + (self.grid_size_x / 2))
         robot_grid_y = int((self.current_pose.y / self.resolution) + (self.grid_size_y / 2))
@@ -73,7 +79,7 @@ class GridMapBuilder(Node):
                 if (0 <= line_x < self.grid_map.shape[1]) and (0 <= line_y < self.grid_map.shape[0]):
                     self.grid_map[line_y, line_x] = 255
 
-            # Mark the end point as occupied
+                    # Mark the end point as occupied
             if (0 <= end_x < self.grid_map.shape[1]) and (0 <= end_y < self.grid_map.shape[0]):
                 self.grid_map[end_y, end_x] = 100
 
