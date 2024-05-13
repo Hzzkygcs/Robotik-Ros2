@@ -174,7 +174,7 @@ class Navigate(Node):
                                    f' len={len(hits)}')
         return ret
 
-    def get_hits_bool_array(self) -> list[bool]:
+    def get_hits_bool_array(self) -> list:
         ret = []
         if len(self.raycast_results) == 0:
             return ret
@@ -252,7 +252,7 @@ class Navigate(Node):
         return True
 
     @property
-    def raycast_results(self) -> list[RayCastHit]:
+    def raycast_results(self) -> list:
         if int(time.time()) - self.raycast_received_timestamp > self.raycast_expire_duration:
             return []
         return self._raycast_results
@@ -374,7 +374,7 @@ class Navigate(Node):
         goal_angle = np.arctan2(dy, dx)
         return distance, goal_angle
 
-def find_closest_value(array: list, start_index: int, value_to_find) -> Optional[list[int]]:
+def find_closest_value(array: list, start_index: int, value_to_find) -> Optional:
     assert not start_index < 0 or start_index >= len(array)
 
     left_exist = True

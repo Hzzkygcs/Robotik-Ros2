@@ -52,8 +52,6 @@ class GridMapBuilder(Node):
         self.publisher_map_robot.publish(msg)
 
     def listener_scan(self, msg):
-        with open("/home/hzz/temp.json", "w") as f:
-            print(msg, file=f)
         # Calculate occupied points from laser scan
         valid_distances = np.array(msg.ranges) < msg.range_max
         distances = np.array(msg.ranges)[valid_distances]
