@@ -38,7 +38,7 @@ class NopMovementOverride(MovementOverride):
     def get_twist(self):
         return
 
-DEGREE = 10
+DEGREE = 7
 MOVEMENT_SPEED = 0.4
 
 class BackwardMovementOverride(MovementOverride):
@@ -69,7 +69,7 @@ class ForwardMovementOverride(MovementOverride):
         if not self.is_valid:
             return self.get_twist_of_next_override()
         ret = Twist()
-        theta = math.radians(2*DEGREE if self.go_to_left else -2 * DEGREE)
+        theta = math.radians(DEGREE if self.go_to_left else -DEGREE)*2
         ret.linear.y = MOVEMENT_SPEED
         ret.angular.z = 2.0 * theta
         return ret

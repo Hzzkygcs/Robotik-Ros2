@@ -11,6 +11,11 @@ from models.multilayergrid import range_2d
 from models.multilayergrid import MultilayerGrid
 
 
+
+GRID_START = -5
+GRID_END = 5
+
+
 class GridMapBuilder(Node):
     def __init__(self):
         super().__init__('grid_map_builder')
@@ -43,9 +48,10 @@ class GridMapBuilder(Node):
         
         # Current pose of the robot
         self.current_pose = Pose2D()
+        ignore_on_error = (lambda x,y: None)
         self.multilayer_grid = MultilayerGrid(
-            (-5.1, -5.1), (5.1, 5.1), self.resolution, lambda: 0,
-            10, max_layers=3)
+            (-5.1, -5.1), (5.1, 5.1), self.resolution, lambda: -1,
+            10, max_layers=3, on_index_error=ignore_on_error)
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -71,16 +77,18 @@ class GridMapBuilder(Node):
             # Use Bresenham's algorithm to update cells in line of sight
             for step, line_x, line_y in range_2d((self.current_pose.x, self.current_pose.y), (end_x, end_y), self.resolution):
                 # Check bounds and mark as free if within grid
-                self.multilayer_grid.set(line_x, line_y, 255)
+                if GRID_START < line_x < GRID_END and GRID_START < line_y < GRID_END:
+                    curr_val = self.multilayer_grid.get(line_x, line_y)
+                    self.multilayer_grid.set(line_x, line_y, max(0, curr_val-2))  # clear path
             # Mark the end point as occupied
-            self.multilayer_grid.set(end_x, end_y, 100)
+            if GRID_START < line_x < GRID_END and GRID_START < line_y < GRID_END:
+                curr_val = self.multilayer_grid.get(end_x, end_y)
+                self.multilayer_grid.set(end_x, end_y, min(100, curr_val + 70))  # blocked path
 
         # Publish the occupancy grid
-        # self.publish_grid_map()
+        self.publish_grid_map_multilayer_grid()
 
-    def listener_scan(self, msg):
-        self.listener_scan_multilayer_grid(msg)
-
+    def listener_scan(self, msg):  # old one, unused
         # Calculate occupied points from laser scan
         valid_distances = np.array(msg.ranges) < msg.range_max
         distances = np.array(msg.ranges)[valid_distances]
@@ -102,6 +110,7 @@ class GridMapBuilder(Node):
                 # Check bounds and mark as free if within grid
                 if (0 <= line_x < self.grid_map.shape[1]) and (0 <= line_y < self.grid_map.shape[0]):
                     self.grid_map[line_y, line_x] = 255
+                    temp = self.grid_map[line_y, line_x]
 
                     # Mark the end point as occupied
             if (0 <= end_x < self.grid_map.shape[1]) and (0 <= end_y < self.grid_map.shape[0]):
@@ -129,31 +138,35 @@ class GridMapBuilder(Node):
                 err += dx
                 y0 += sy
 
-    def publish_grid_map(self):
+    def publish_grid_map_multilayer_grid(self):
+        try:
+            grid_msg = OccupancyGrid()
+            grid_msg.header.stamp = self.get_clock().now().to_msg()
+            grid_msg.header.frame_id = "map"
+            grid_msg.info = MapMetaData()
+            grid_msg.info.resolution = self.resolution
+            grid_msg.info.width = self.multilayer_grid.get_layer(0).pixel_width
+            grid_msg.info.height = self.multilayer_grid.get_layer(0).pixel_height
+            grid_msg.info.origin = Pose()
+            grid_msg.data = self.multilayer_grid.get_layer(0).ravel()
+            self.publisher_map.publish(grid_msg)
+        except Exception as e:
+            print(min(grid_msg.data), max(grid_msg.data))
+            raise e
+        print('Occupancy map published')
+
+    def publish_grid_map(self):  # old one, unused
         grid_msg = OccupancyGrid()
         grid_msg.header.stamp = self.get_clock().now().to_msg()
         grid_msg.header.frame_id = "map"
         grid_msg.info = MapMetaData()
         grid_msg.info.resolution = self.resolution
-        grid_msg.info.width = self.multilayer_grid.get_layer(0).pixel_width
-        grid_msg.info.height = self.multilayer_grid.get_layer(0).pixel_height
+        grid_msg.info.width = self.grid_map.shape[1]
+        grid_msg.info.height = self.grid_map.shape[0]
         grid_msg.info.origin = Pose()
-        grid_msg.data = self.multilayer_grid.get_layer(0).ravel()
+        grid_msg.data = self.grid_map.ravel().tolist()
         self.publisher_map.publish(grid_msg)
         print('Occupancy map published')
-
-    # def publish_grid_map(self):
-    #     grid_msg = OccupancyGrid()
-    #     grid_msg.header.stamp = self.get_clock().now().to_msg()
-    #     grid_msg.header.frame_id = "map"
-    #     grid_msg.info = MapMetaData()
-    #     grid_msg.info.resolution = self.resolution
-    #     grid_msg.info.width = self.grid_map.shape[1]
-    #     grid_msg.info.height = self.grid_map.shape[0]
-    #     grid_msg.info.origin = Pose()
-    #     grid_msg.data = self.grid_map.ravel().tolist()
-    #     self.publisher_map.publish(grid_msg)
-    #     print('Occupancy map published')
 
 def main(args=None):
     rclpy.init(args=args)

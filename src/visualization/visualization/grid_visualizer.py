@@ -28,9 +28,12 @@ class GridMapVisualizer(Node):
 
         # Scale the values to 0 - 255 for visualization (0=free, 100=occupied, -1=unknown)
         image = np.zeros_like(grid, dtype=np.uint8)
-        image[grid == -1] = 255  # Free spaces to white
-        image[grid == 100] = 0  # Occupied spaces to black
-        image[grid == 0] = 127  # Unknown spaces to gray
+        # image[grid == -1] = 255  # Free spaces to white
+        # image[grid == 100] = 0  # Occupied spaces to black
+        # image[grid == 0] = 127  # Unknown spaces to gray
+        image[grid < 30] = 255  # Free spaces to white
+        image[grid >= 30] = 0  # Occupied spaces to black
+        image[grid == -1] = 127  # Unknown spaces to gray
 
         # Draw robot pose
         cv2.circle(image, (int(self.robot_pose.x), int(self.robot_pose.y)), 3, (0, 255, 0), -1)
@@ -43,6 +46,7 @@ class GridMapVisualizer(Node):
 
         # Display the image using OpenCV
         cv2.imshow("Occupancy Grid", flipped_image)
+        self.get_logger().info('cv2.imshow()')
         cv2.waitKey(1)
 
     def robot_pose_callback(self, msg):

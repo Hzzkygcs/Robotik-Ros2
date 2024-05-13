@@ -36,7 +36,7 @@ class Keyboard(Node):
         self.keyboard_input_stdscr.addstr(4, 20, 'Waiting current_goal_point to be intiialized')
         self.set_status("")
         self.already_stopped = False
-        self.movement_distance = 0.3
+        self.movement_distance = 0.1
         self.exit_signal = False
         self.start_time = int(time.time())
         self.user_input_mode = False
@@ -65,20 +65,20 @@ class Keyboard(Node):
 
         if key == ord('w'):
             self.current_goal_point[1] += self.movement_distance
-            self.set_status("Up")
+            self.set_status(f"Up, {self.current_goal_point}")
         elif key == ord('q'):
             curses.endwin()
             self.set_status("Stopping...")
             self.exit_signal = True
         elif key == ord('s'):
             self.current_goal_point[1] -= self.movement_distance
-            self.set_status("Down")
+            self.set_status(f"Down, {self.current_goal_point}")
         elif key == ord('a'):
             self.current_goal_point[0] -= self.movement_distance
-            self.set_status("Left")
+            self.set_status(f"Left, {self.current_goal_point}")
         elif key == ord('d'):
             self.current_goal_point[0] += self.movement_distance
-            self.set_status("Right")
+            self.set_status(f"Right, {self.current_goal_point}")
         elif key == ord('i'):
             self.manual_input_mode(self.manual_input_mode_callback, msg="Set target goal relative to current robot in `x,y` format")
             stop = True
