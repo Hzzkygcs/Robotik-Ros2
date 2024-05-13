@@ -59,17 +59,18 @@ class BackwardMovementOverride(MovementOverride):
 
 
 class ForwardMovementOverride(MovementOverride):
-    def __init__(self, go_to_left: bool, end_duration_relative=3, next_override: MovementOverride=None):
+    def __init__(self, go_to_left_func, angle_multiplier, end_duration_relative=3, next_override: MovementOverride=None):
         super().__init__(end_duration_relative)
         self.next_override = next_override
-        self.go_to_left = go_to_left
+        self.go_to_left_func = go_to_left_func
+        self.angle_multiplier = angle_multiplier
 
     @property
     def get_twist(self):
         if not self.is_valid:
             return self.get_twist_of_next_override()
         ret = Twist()
-        theta = math.radians(DEGREE if self.go_to_left else -DEGREE)*2
+        theta = math.radians(DEGREE if self.go_to_left_func() else -DEGREE)*self.angle_multiplier
         ret.linear.y = MOVEMENT_SPEED
         ret.angular.z = 2.0 * theta
         return ret

@@ -313,11 +313,11 @@ class Navigate(Node):
         self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'} with dist {min_distance}")
 
         expire_duration = 0
-        goal_is_in_left = self.goal_angle() > 0
+        goal_is_in_left_func = lambda: self.goal_angle() > 0
         self.movement_override = MovementOverride.chain(
             BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1),
-            ForwardMovementOverride(not obstacle_left, expire_duration:= expire_duration + 0.5),
-            ForwardMovementOverride(goal_is_in_left, expire_duration:= expire_duration + 2.5),
+            ForwardMovementOverride(lambda: not obstacle_left, 0.5, expire_duration:= expire_duration + 0.5),
+            ForwardMovementOverride(goal_is_in_left_func, 1, expire_duration:= expire_duration + 2.5),
         )
         return True
 
