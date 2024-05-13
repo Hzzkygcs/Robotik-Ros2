@@ -7,8 +7,8 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import math
 
-from models.multilayergrid import range_2d
-from models.multilayergrid import MultilayerGrid
+from mapping.models.multilayergrid import range_2d
+from mapping.models.multilayergrid import MultilayerGrid
 
 
 
