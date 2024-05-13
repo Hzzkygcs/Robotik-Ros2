@@ -7,7 +7,8 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import math
 
-from src.mapping.mapping.models.multilayergrid import MultilayerGrid
+from models.multilayergrid import range_2d
+from models.multilayergrid import MultilayerGrid
 
 
 class GridMapBuilder(Node):
@@ -21,7 +22,7 @@ class GridMapBuilder(Node):
         self.subscription_scan = self.create_subscription(
             LaserScan,
             '/hokuyo',
-            self.listener_scan,
+            self.listener_scan_multilayer_grid,
             10)
         self.publisher_map = self.create_publisher(
             OccupancyGrid,
@@ -31,7 +32,7 @@ class GridMapBuilder(Node):
             Pose2D,
             '/occupancy_map/robot_pose',
             10)
-        
+        self.get_logger().info('Running...')
         # Grid map parameters
         self.map_size_x = 10  # in meters
         self.map_size_y = 10  # in meters
@@ -43,7 +44,8 @@ class GridMapBuilder(Node):
         # Current pose of the robot
         self.current_pose = Pose2D()
         self.multilayer_grid = MultilayerGrid(
-            (-5.1, -5.1), (5.1, 5.1), self.resolution, lambda: -1, 10)
+            (-5.1, -5.1), (5.1, 5.1), self.resolution, lambda: 0,
+            10, max_layers=3)
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -56,7 +58,29 @@ class GridMapBuilder(Node):
         msg.theta = self.current_pose.theta
         self.publisher_map_robot.publish(msg)
 
+    def listener_scan_multilayer_grid(self, msg):
+        # Calculate occupied points from laser scan
+        valid_distances = np.array(msg.ranges) < msg.range_max
+        distances = np.array(msg.ranges)[valid_distances]
+        angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
+        x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
+        y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
+
+
+        for end_x, end_y in zip(x_coords, y_coords):
+            # Use Bresenham's algorithm to update cells in line of sight
+            for step, line_x, line_y in range_2d((self.current_pose.x, self.current_pose.y), (end_x, end_y), self.resolution):
+                # Check bounds and mark as free if within grid
+                self.multilayer_grid.set(line_x, line_y, 255)
+            # Mark the end point as occupied
+            self.multilayer_grid.set(end_x, end_y, 100)
+
+        # Publish the occupancy grid
+        # self.publish_grid_map()
+
     def listener_scan(self, msg):
+        self.listener_scan_multilayer_grid(msg)
+
         # Calculate occupied points from laser scan
         valid_distances = np.array(msg.ranges) < msg.range_max
         distances = np.array(msg.ranges)[valid_distances]
@@ -111,12 +135,25 @@ class GridMapBuilder(Node):
         grid_msg.header.frame_id = "map"
         grid_msg.info = MapMetaData()
         grid_msg.info.resolution = self.resolution
-        grid_msg.info.width = self.grid_map.shape[1]
-        grid_msg.info.height = self.grid_map.shape[0]
+        grid_msg.info.width = self.multilayer_grid.get_layer(0).pixel_width
+        grid_msg.info.height = self.multilayer_grid.get_layer(0).pixel_height
         grid_msg.info.origin = Pose()
-        grid_msg.data = self.grid_map.ravel().tolist()
+        grid_msg.data = self.multilayer_grid.get_layer(0).ravel()
         self.publisher_map.publish(grid_msg)
         print('Occupancy map published')
+
+    # def publish_grid_map(self):
+    #     grid_msg = OccupancyGrid()
+    #     grid_msg.header.stamp = self.get_clock().now().to_msg()
+    #     grid_msg.header.frame_id = "map"
+    #     grid_msg.info = MapMetaData()
+    #     grid_msg.info.resolution = self.resolution
+    #     grid_msg.info.width = self.grid_map.shape[1]
+    #     grid_msg.info.height = self.grid_map.shape[0]
+    #     grid_msg.info.origin = Pose()
+    #     grid_msg.data = self.grid_map.ravel().tolist()
+    #     self.publisher_map.publish(grid_msg)
+    #     print('Occupancy map published')
 
 def main(args=None):
     rclpy.init(args=args)

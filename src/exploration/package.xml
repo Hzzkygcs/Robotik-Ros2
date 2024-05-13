@@ -4,7 +4,7 @@
   <name>exploration</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="alifwr98@gmail.com">alif</maintainer>
+  <maintainer email="immanuel01@ui.ac.id">nuel</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>nav_msgs</depend>

@@ -19,6 +19,7 @@ class GridMapVisualizer(Node):
             self.robot_pose_callback,
             10)
         self.robot_pose = Pose2D()
+        self.get_logger().info('Starting grid map visualizer.')
 
     def occupancy_callback(self, msg):
         # self.get_logger().info('Received occupancy grid')
