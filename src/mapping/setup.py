@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mapping = mapping.mapping:main',
+            'mapping_v = mapping.mapping_v:main',
         ],
     },
 )

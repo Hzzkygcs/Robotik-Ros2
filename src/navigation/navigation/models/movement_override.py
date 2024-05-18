@@ -21,7 +21,7 @@ class MovementOverride:
         return self.next_override.get_twist if self.next_override is not None else None
 
     @staticmethod
-    def chain(*movement_overrides: list[MovementOverride]):
+    def chain(*movement_overrides: MovementOverride):
         if len(movement_overrides) == 0:
             return None
         for i in range(len(movement_overrides)):

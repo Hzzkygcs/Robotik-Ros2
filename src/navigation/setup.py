@@ -21,7 +21,9 @@ setup(
     entry_points={
         'console_scripts': [
             'navigate = navigation.navigate:main',
+            'navigate_v = navigation.navigate_v:main',
             'keyboard = navigation.keyboard:main',
+            'keyboard_v = navigation.keyboard_v:main',
         ],
     },
 )
