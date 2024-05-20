@@ -1,14 +1,21 @@
+import math
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Pose2D, Point, Twist
 # from navigation.srv import SetGoal
+from std_msgs.msg import String
 
 import numpy as np
 
-TICK_RATE = 0.7  # in seconds
+from navigation.models.movement_override import BackwardMovementOverride, ForwardMovementOverride, MovementOverride, \
+    NopMovementOverride, RotateInPlace
+
+TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.33
+MAX_ANGLE_DEGREE_TOWARD_GOAL = 10
 
 class Navigate(Node):
     def __init__(self):
@@ -32,6 +39,12 @@ class Navigate(Node):
             '/hokuyo',
             self.listener_scan,
             10)
+        self.subscription_user_input = self.create_subscription(
+            String,
+            '/user_string_input',  # for debugging purpose only
+            self.user_input,
+            10
+        )
 
         self.timer = self.create_timer(TICK_RATE, self.navigate)
 
@@ -43,10 +56,15 @@ class Navigate(Node):
 
         self.goal_point = Point()
         self.goal_point_received = False
+        self.movement_override = NopMovementOverride()
 
     def listener_scan(self, msg):
         self.laser_scan = msg
         self.laser_scan_received = True
+
+    def user_input(self, msg):
+        self.movement_override = RotateInPlace(3, 2)
+
 
     def robot_pose_callback(self, msg):
         self.robot_pose = msg
@@ -60,33 +78,82 @@ class Navigate(Node):
         short_distance = float('inf')
         predicted_goal_angle = 0
 
-        if self.laser_scan_received:  # Obstacle Avoidance
-            distances = np.array(self.laser_scan.ranges)
-            angles = np.linspace(self.laser_scan.angle_min, self.laser_scan.angle_max, len(self.laser_scan.ranges))
-            shortest = distances.argmin()
-            short_angle = angles[shortest]  # Left of robot is positive, right of robot is negative, 0 is front
-            # print(f"Shortest Angle: {short_angle}")
-            short_distance = distances[shortest]
-            shortest_direction_absolute = (self.robot_pose.theta + short_angle) % 6.28
-            predicted_goal_angle = shortest_direction_absolute
-            if predicted_goal_angle > 3.14:  # Direction relative to robot closest to obstacle
-                predicted_goal_angle += -6.28
+        if not self.laser_scan_received:  # Obstacle Avoidance
+            return False
 
+        distances = np.array(self.laser_scan.ranges)
+        angles = np.linspace(self.laser_scan.angle_min, self.laser_scan.angle_max, len(self.laser_scan.ranges))
+        shortest = distances.argmin()
+        short_angle = angles[shortest]  # Left of robot is positive, right of robot is negative, 0 is front
+        short_distance = distances[shortest]
+
+        shortest_direction_absolute = (self.robot_pose.theta + short_angle) % 6.28
+        predicted_goal_angle = shortest_direction_absolute
+        if predicted_goal_angle > 3.14:  # Direction relative to robot closest to obstacle
+            predicted_goal_angle += -6.28
+        obstacle_on_left = short_angle > 0
         avoid_distance = 0.33
         too_close = False
-        if short_distance < avoid_distance:
-            print(f"Too close!: {predicted_goal_angle}")
-            too_close = True
-        return too_close, short_distance, predicted_goal_angle
+
+        if short_distance > avoid_distance:
+            return False
+        print(f"Too close!: {predicted_goal_angle}")
+        self.robot_go_bakcward(obstacle_on_left)
+        return True
+
+
+    def robot_go_bakcward(self, obstacle_left):
+        self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'}")
+
+        expire_duration = 0
+        goal_is_in_left_func = lambda: self.goal_angle() > 0
+        self.movement_override = MovementOverride.chain(
+            BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1.5),
+            ForwardMovementOverride(lambda: not obstacle_left, 0.5, expire_duration:= expire_duration + 0.5),
+            ForwardMovementOverride(goal_is_in_left_func, 1, expire_duration:= expire_duration + 0.5),
+        )
+        return True
+
+
+    def goal_angle(self, relative_to_pov=True, angle_range_start=-math.pi, angle_range_end=math.pi + 0.001):
+        dx = self.goal_point.x - self.robot_pose.x
+        dy = self.goal_point.y - self.robot_pose.y
+        goal_angle = np.arctan2(dy, dx)
+        if relative_to_pov:
+            # goal_angle -= math.pi/2
+            goal_angle -= self.robot_pose.theta
+        while goal_angle < angle_range_start:
+            goal_angle += math.pi*2
+        while goal_angle > angle_range_end:
+            goal_angle -= math.pi*2
+        return goal_angle
 
     def navigate(self):
         # print(f"Received goal point: {self.goal_point}")
+        twist = self.movement_override.twist
+        if twist is not None:
+            self.publisher_cmd_vel.publish(twist)
+            return
+        if  self.goal_distance() < 0.3:
+            self.publisher_cmd_vel.publish(Twist())
+            return
+        goal_angle_deg = math.degrees(self.goal_angle())
+        if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:
+            def rotation():
+                deg = math.degrees(self.goal_angle())
+                if abs(deg) <= MAX_ANGLE_DEGREE_TOWARD_GOAL:
+                    return None
+                return math.copysign(deg/14, deg)
+            print(f"Rotating... {goal_angle_deg}")
+            self.movement_override = RotateInPlace(rotation)
 
-        too_close, short_distance, predicted_avoid_angle = self.obstacle_avoidance()
+        # if self.obstacle_avoidance():
+        #     return
 
         dx = self.goal_point.x - self.robot_pose.x
         dy = self.goal_point.y - self.robot_pose.y
-        distance = np.sqrt(dx ** 2 + dy ** 2)
+        distance = self.goal_distance()
+
         # Direction where we should face, same as theta but quadrant 3-4 is negative (-3.14->-0), 4 max is -0
         goal_angle = np.arctan2(dy, dx)
         print(f"Robot's heading to: {self.goal_point.x, self.goal_point.y, goal_angle}")
@@ -96,7 +163,7 @@ class Navigate(Node):
         theta = goal_angle - self.robot_pose.theta  # Adjusted direction based on where the robot's facing
         goal_angle_adjusted = goal_angle
         if goal_angle_adjusted < 0:
-            goal_angle_adjusted = 3.14 + (goal_angle % 3.14)
+            goal_angle_adjusted = goal_angle % math.pi
 
         while theta > np.pi:
             theta -= 2 * np.pi
@@ -105,7 +172,7 @@ class Navigate(Node):
 
         cmd_vel = Twist()
 
-        if distance > 0.1:
+        if distance > 0.3:
             cmd_vel.linear.y = 0.6
 
             print(goal_angle_adjusted, self.robot_pose.theta)
@@ -120,6 +187,10 @@ class Navigate(Node):
         self.publisher_cmd_vel.publish(cmd_vel)
 
         return True
+    def goal_distance(self):
+        dx = self.goal_point.x - self.robot_pose.x
+        dy = self.goal_point.y - self.robot_pose.y
+        return np.sqrt(dx ** 2 + dy ** 2)
 
 
 def main(args=None):

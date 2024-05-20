@@ -14,11 +14,11 @@ class MovementOverride:
         return int(time.time()) < self.end_duration
 
     @property
-    def get_twist(self):
+    def twist(self):
         raise NotImplementedError()
 
-    def get_twist_of_next_override(self):
-        return self.next_override.get_twist if self.next_override is not None else None
+    def _get_twist_of_next_override(self):
+        return self.next_override.twist if self.next_override is not None else None
 
     @staticmethod
     def chain(*movement_overrides: MovementOverride):
@@ -35,11 +35,11 @@ class NopMovementOverride(MovementOverride):
     def __init__(self, _ignored=None, next_override: MovementOverride=None):
         super().__init__(-1)
     @property
-    def get_twist(self):
+    def twist(self):
         return
 
-DEGREE = 7
-MOVEMENT_SPEED = 0.4
+DEGREE = 10
+MOVEMENT_SPEED = 0.5
 
 class BackwardMovementOverride(MovementOverride):
     def __init__(self, obstacle_on_left: bool, expire_duration=3, next_override: MovementOverride=None):
@@ -48,9 +48,9 @@ class BackwardMovementOverride(MovementOverride):
         self.obstacle_at_left = obstacle_on_left
 
     @property
-    def get_twist(self):
+    def twist(self):
         if not self.is_valid:
-            return self.get_twist_of_next_override()
+            return self._get_twist_of_next_override()
         ret = Twist()
         theta = math.radians(-DEGREE if self.obstacle_at_left else DEGREE) * 3
         ret.linear.y = -MOVEMENT_SPEED
@@ -66,9 +66,9 @@ class ForwardMovementOverride(MovementOverride):
         self.angle_multiplier = angle_multiplier
 
     @property
-    def get_twist(self):
+    def twist(self):
         if not self.is_valid:
-            return self.get_twist_of_next_override()
+            return self._get_twist_of_next_override()
         ret = Twist()
         theta = math.radians(DEGREE if self.go_to_left_func() else -DEGREE)*self.angle_multiplier
         ret.linear.y = MOVEMENT_SPEED
@@ -86,9 +86,9 @@ class RotateTowardGoalOverride(MovementOverride):
 
 
     @property
-    def get_twist(self):
+    def twist(self):
         if not self.is_valid:
-            return self.get_twist_of_next_override()
+            return self._get_twist_of_next_override()
         theta = self.get_goal_angle_func() - self.get_robot_pose_func().theta
 
         while theta > math.pi:
@@ -100,3 +100,24 @@ class RotateTowardGoalOverride(MovementOverride):
         cmd_vel.linear.y = 0.4
         cmd_vel.angular.z = 2.0 * theta
         return cmd_vel
+
+class RotateInPlace(MovementOverride):
+    def __init__(self, angular_velocity_func, end_duration_relative=3, next_override: MovementOverride=None):
+        super().__init__(end_duration_relative, next_override)
+        self.angular_velocity_func = angular_velocity_func
+
+    @property
+    def twist(self):
+        if not self.is_valid:
+            return self._get_twist_of_next_override()
+        cmd_vel = Twist()
+        cmd_vel.linear.y = 0.0
+
+        angular_velocity = self.angular_velocity_func()
+        if angular_velocity is None:
+            self.end_duration = 0  # set as no longer valid
+            return self._get_twist_of_next_override()
+        cmd_vel.angular.z = float(angular_velocity)
+        return cmd_vel
+
+

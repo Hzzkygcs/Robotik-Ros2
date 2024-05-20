@@ -93,7 +93,7 @@ class Keyboard(Node):
             stop = True
         else:
             stop = True
-            self.stop()
+            # self.stop()
         if not stop:
             self.keep_broadcast = False
             self.already_stopped = False
