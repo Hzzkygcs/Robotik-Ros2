@@ -1,0 +1,9 @@
+float64 start_x
+float64 start_y
+float64 end_x
+float64 end_y
+int32 parent_ind
+int32 top_left_child_ind
+int32 top_right_child_ind
+int32 bot_left_child_ind
+int32 bot_right_child_ind
