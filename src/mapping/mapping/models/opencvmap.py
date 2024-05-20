@@ -8,6 +8,8 @@ plt.ion()
 MAP_START=(-8.3,-5.625)
 MAP_END=(8.3, 5.4)
 
+mngr = plt.get_current_fig_manager()
+
 
 RESOLUTION = 0.01
 

@@ -36,7 +36,7 @@ class Keyboard(Node):
         self.keyboard_input_stdscr.addstr(4, 20, 'Waiting current_goal_point to be intiialized')
         self.set_status("")
         self.already_stopped = False
-        self.movement_distance = 0.1
+        self.movement_distance = 0.5
         self.exit_signal = False
         self.start_time = int(time.time())
         self.user_input_mode = False
