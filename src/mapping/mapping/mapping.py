@@ -7,7 +7,8 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import time
 
-from models.opencvmap import OpenCvMap
+from models.numpymap import NumpyMap, apply_thresholding
+from src.mapping.mapping.models.numpymap import NumpyMapDisplayer
 
 
 class GridMapBuilder(Node):
@@ -32,7 +33,9 @@ class GridMapBuilder(Node):
             '/occupancy_map/robot_pose',
             10)
 
-        self.map = OpenCvMap()
+        self.map = NumpyMap()
+        self.displayer = NumpyMapDisplayer(self.map)
+        self.displayer_abstract = NumpyMapDisplayer(self.map)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -60,7 +63,6 @@ class GridMapBuilder(Node):
         if self.current_pose is None:
             return
 
-
         # Calculate occupied points from laser scan
         valid_distances = np.array(msg.ranges) < msg.range_max
         distances = np.array(msg.ranges)[valid_distances]
@@ -71,7 +73,11 @@ class GridMapBuilder(Node):
 
         for end_x, end_y in zip(x_coords, y_coords):
             self.map.add_raycast(curr_pos, (end_x, end_y))
-        self.map.update_frame()
+        (self.displayer
+         .update_frame())
+        (self.displayer_abstract
+         .set_new_map(self.map.resize(0.25))
+         .update_frame())
 
         # Publish the occupancy grid
         self.publish_grid_map()
