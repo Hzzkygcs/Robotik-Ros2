@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose2D
@@ -34,8 +35,12 @@ class GridMapBuilder(Node):
             10)
 
         self.map = NumpyMap()
-        self.displayer = NumpyMapDisplayer(self.map)
-        self.displayer_abstract = NumpyMapDisplayer(self.map)
+
+        fig = plt.figure()
+        ax1 = fig.add_subplot(211)
+        ax2 = fig.add_subplot(212)
+        self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
+        self.displayer_abstract = NumpyMapDisplayer(self.map, fig, ax2)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters

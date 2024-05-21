@@ -5,11 +5,11 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-plt.ion()
+
 MAP_START=(-8.3,-5.625)
 MAP_END=(8.3, 5.4)
 
-mngr = plt.get_current_fig_manager()
+
 
 
 RESOLUTION = 0.02
@@ -59,12 +59,17 @@ class NumpyMap:
         px_x, px_y = px
         percentage_x = px_x / self.px_width
         percentage_x_end = (px_x+1) / self.px_width
-        percentage_y = px_y / self.px_height
-        percentage_y_end = (px_y+1) / self.px_height
+
+        # -1 isntead of +1 because pixel +y is go down meanwhile  cartecius +y is go up
+        percentage_y1 = px_y / self.px_height
+        percentage_y2 = (px_y+1) / self.px_height
+        y1 = self.min_y + self.act_height * percentage_y1
+        y2 = self.min_y + self.act_height * percentage_y2
+
         ret = Rect(self.min_x + self.act_width * percentage_x,
-                   self.min_y + self.act_height * percentage_y,
+                   min(y1, y2),
                    self.min_x + self.act_width * percentage_x_end,
-                   self.min_y + self.act_height * percentage_y_end)
+                    max(y1, y2))
         return ret
 
     def actual_rect_to_px_rect(self, actual_rect: Rect):
@@ -72,8 +77,8 @@ class NumpyMap:
         x_end, y_end = self.actual_to_px(actual_rect.end)
 
         # because +Y is going up on cartecius (actual) coordinate, but going down in array coordinate
-        assert y_end < y_start
-        y_start, y_end = y_end, y_start
+        if y_end < y_start:
+            y_start, y_end = y_end, y_start
         return Rect(x_start, y_start, x_end, y_end)
 
 
@@ -142,7 +147,7 @@ class NumpyMap:
                 actual_rect_of_ret = ret.px_to_actual_rect((x,y))
                 px_rect_of_self = self.actual_rect_to_px_rect(actual_rect_of_ret)
                 sliced = px_rect_of_self.slice_map(self.canvas)
-                ret.canvas[y][x] = sliced.max()
+                ret.canvas[ret.px_height - y - 1][x] = sliced.max(initial=0)
         return ret
 
     def resize_accurate_but_inefficient(self, new_resolution, show_image=False):
@@ -164,10 +169,10 @@ class NumpyMap:
 
 
 class NumpyMapDisplayer:
-    def __init__(self, map: NumpyMap):
+    def __init__(self, map: NumpyMap, fig=None, ax=None):
         self.map = map
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(2,1,1)
+        self.fig = plt.figure() if fig is None else fig
+        self.ax = self.fig.add_subplot(2,1,1) if ax is None else ax
         self._canvas_axes = self.ax.imshow(self.map.canvas, cmap='gray', vmin=0, vmax=255)
         self.fig.show()
 
@@ -270,6 +275,8 @@ class Rect:
         self.min_y = min_y
         self.max_x = max_x
         self.max_y = max_y
+        assert self.min_x <= self.max_x
+        assert self.min_y <= self.max_y
 
     def slice_map(self, np_canvas_array) -> np.ndarray:
         return np_canvas_array[self.min_y:self.max_y, self.min_x:self.max_x]
