@@ -55,17 +55,27 @@ class NumpyMap:
     def actual_to_px(self, point):
         return (self.x_to_px(point[0]), self.y_to_px(point[1]))
 
-    def px_to_rect(self, px: tuple) -> Rect:  # tuple of tuple of float
+    def px_to_actual_rect(self, px: tuple) -> Rect:  # tuple of tuple of float
         px_x, px_y = px
         percentage_x = px_x / self.px_width
-        percentage_x_end = (px_x+1) / self.px_height
-        percentage_y = px_y / self.px_width
+        percentage_x_end = (px_x+1) / self.px_width
+        percentage_y = px_y / self.px_height
         percentage_y_end = (px_y+1) / self.px_height
         ret = Rect(self.min_x + self.act_width * percentage_x,
                    self.min_y + self.act_height * percentage_y,
                    self.min_x + self.act_width * percentage_x_end,
                    self.min_y + self.act_height * percentage_y_end)
         return ret
+
+    def actual_rect_to_px_rect(self, actual_rect: Rect):
+        x_start, y_start = self.actual_to_px(actual_rect.start)
+        x_end, y_end = self.actual_to_px(actual_rect.end)
+
+        # because +Y is going up on cartecius (actual) coordinate, but going down in array coordinate
+        assert y_end < y_start
+        y_start, y_end = y_end, y_start
+        return Rect(x_start, y_start, x_end, y_end)
+
 
     def px_to_x(self, px: float) -> float:
         percentage = px / self.px_width
@@ -125,7 +135,17 @@ class NumpyMap:
             else:
                 self.canvas[y][x] = 255
 
-    def resize(self, new_resolution, show_image=False):
+    def resize_dilated_but_efficient(self, new_resolution, show_image=False):
+        ret = NumpyMap(self.map_start, self.map_end, new_resolution, show_image=show_image)
+        for x in range(ret.px_width):
+            for y in range(ret.px_height):
+                actual_rect_of_ret = ret.px_to_actual_rect((x,y))
+                px_rect_of_self = self.actual_rect_to_px_rect(actual_rect_of_ret)
+                sliced = px_rect_of_self.slice_map(self.canvas)
+                ret.canvas[y][x] = sliced.max()
+        return ret
+
+    def resize_accurate_but_inefficient(self, new_resolution, show_image=False):
         ret = NumpyMap(self.map_start, self.map_end, new_resolution, show_image=show_image)
         for x in range(self.px_width):
             x_actual = self.px_to_x(x)
@@ -135,9 +155,6 @@ class NumpyMap:
                 new_value = max(ret.get(actual_coord), self.canvas[y][x])
                 ret.set(actual_coord, new_value)
         return ret
-
-
-
 
     def resize_px_canvas(self, estimate_new_resolution):
         assert self.resolution < estimate_new_resolution
@@ -149,11 +166,14 @@ class NumpyMap:
 class NumpyMapDisplayer:
     def __init__(self, map: NumpyMap):
         self.map = map
-        self.__canvas_axes = plt.imshow(self.map.canvas, cmap='gray', vmin=0, vmax=255)
-        plt.show()
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(2,1,1)
+        self._canvas_axes = self.ax.imshow(self.map.canvas, cmap='gray', vmin=0, vmax=255)
+        self.fig.show()
+
 
     def update_frame(self):
-        self.__canvas_axes.set_data(apply_thresholding(self.map.canvas))
+        self._canvas_axes.set_data(apply_thresholding(self.map.canvas))
         plt.pause(0.001)
         plt.draw()
 
@@ -251,7 +271,18 @@ class Rect:
         self.max_x = max_x
         self.max_y = max_y
 
+    def slice_map(self, np_canvas_array) -> np.ndarray:
+        return np_canvas_array[self.min_y:self.max_y, self.min_x:self.max_x]
+
     @property
     def mid(self):
         return (self.min_x + self.max_x) / 2, (self.min_y + self.max_y) / 2
+
+    @property
+    def start(self):
+        return self.min_x, self.min_y
+
+    @property
+    def end(self):
+        return self.max_x, self.max_y
 

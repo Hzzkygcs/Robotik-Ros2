@@ -76,7 +76,7 @@ class GridMapBuilder(Node):
         (self.displayer
          .update_frame())
         (self.displayer_abstract
-         .set_new_map(self.map.resize(0.25))
+         .set_new_map(self.map.resize_dilated_but_efficient(0.25))
          .update_frame())
 
         # Publish the occupancy grid
