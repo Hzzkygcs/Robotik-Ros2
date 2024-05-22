@@ -5,7 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Pose2D, Point, Twist
 # from navigation.srv import SetGoal
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
 
 import numpy as np
 
@@ -34,6 +34,10 @@ class Navigate(Node):
             Twist,
             '/robot_cmd_vel',
             10)
+        self.publisher_goal_point_reached = self.create_publisher(
+            Empty,
+            '/goal_point/reached',
+            10)
         self.subscription_scan = self.create_subscription(
             LaserScan,
             '/hokuyo',
@@ -56,6 +60,7 @@ class Navigate(Node):
 
         self.goal_point = Point()
         self.goal_point_received = False
+        self.arrived = True
         self.movement_override = NopMovementOverride()
 
     def listener_scan(self, msg):
@@ -73,6 +78,7 @@ class Navigate(Node):
     def goal_point_callback(self, msg):
         self.goal_point = msg
         self.goal_point_received = True
+        self.arrived = False
 
     def obstacle_avoidance(self):
         short_distance = float('inf')
@@ -183,7 +189,9 @@ class Navigate(Node):
         else:
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0
-
+            if not self.arrived:
+                self.publisher_goal_point_reached.publish(None)
+                self.arrived = True
         self.publisher_cmd_vel.publish(cmd_vel)
 
         return True

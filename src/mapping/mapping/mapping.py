@@ -8,6 +8,9 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import time
 
+from std_msgs.msg import Empty
+
+from mapping.models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
 from models.numpymap import NumpyMap, apply_thresholding
 from src.mapping.mapping.models.numpymap import NumpyMapDisplayer
 
@@ -24,6 +27,11 @@ class GridMapBuilder(Node):
             LaserScan,
             '/hokuyo',
             self.listener_scan,
+            10)
+        self.subscription_scan = self.create_subscription(
+            Empty,
+            '/goal_point/reached',
+            self.goal_point_is_reached,
             10)
         self.publisher_map = self.create_publisher(
             OccupancyGrid,
@@ -49,9 +57,16 @@ class GridMapBuilder(Node):
         self.grid_size_x = int(self.map_size_x / self.resolution)
         self.grid_size_y = int(self.map_size_y / self.resolution)
         self.grid_map = np.zeros((self.grid_size_x, self.grid_size_y), dtype=np.int8)
-
         # Current pose of the robot
         self.current_pose = None
+
+        ### EXPLORATION
+        self.bfs = ExplorationSteps(
+            ExploreUnknownMaps(),
+            BfsToDestination(6.275, -2.225))
+
+    def goal_point_is_reached(self, *msg):
+        self.bfs.move_on_to_next_destination()
 
     def listener_pose(self, msg):
         self.current_pose = msg
