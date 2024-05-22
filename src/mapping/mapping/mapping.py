@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose2D
+from geometry_msgs.msg import Pose2D, Point
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from geometry_msgs.msg import Pose
@@ -10,10 +10,9 @@ import time
 
 from std_msgs.msg import Empty
 
-from mapping.models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
-from models.numpymap import NumpyMap, apply_thresholding
-from src.mapping.mapping.models.numpymap import NumpyMapDisplayer
 
+from models.numpymap import NumpyMap, NumpyMapDisplayer
+from models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
 
 class GridMapBuilder(Node):
     def __init__(self):
@@ -33,6 +32,10 @@ class GridMapBuilder(Node):
             '/goal_point/reached',
             self.goal_point_is_reached,
             10)
+        self.publisher_goal_point = self.create_publisher(
+            Point,
+            '/goal_point',
+            10)
         self.publisher_map = self.create_publisher(
             OccupancyGrid,
             '/occupancy_map',
@@ -48,7 +51,7 @@ class GridMapBuilder(Node):
         ax1 = fig.add_subplot(211)
         ax2 = fig.add_subplot(212)
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
-        self.displayer_abstract = NumpyMapDisplayer(self.map, fig, ax2)
+        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(0.25), fig, ax2)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -63,7 +66,7 @@ class GridMapBuilder(Node):
         ### EXPLORATION
         self.bfs = ExplorationSteps(
             ExploreUnknownMaps(),
-            BfsToDestination(6.275, -2.225))
+            BfsToDestination((6.275, -2.225)))
 
     def goal_point_is_reached(self, *msg):
         self.bfs.move_on_to_next_destination()
@@ -93,14 +96,22 @@ class GridMapBuilder(Node):
 
         for end_x, end_y in zip(x_coords, y_coords):
             self.map.add_raycast(curr_pos, (end_x, end_y))
-        (self.displayer
-         .update_frame())
-        (self.displayer_abstract
-         .set_new_map(self.map.resize_dilated_but_efficient(0.25))
-         .update_frame())
+        self.displayer.update_frame()
+        resized_map = self.map.resize_dilated_but_efficient(0.25)
+        self.displayer_abstract.set_new_map(resized_map).update_frame()
+        self.broadcast_goal(resized_map)
 
         # Publish the occupancy grid
         self.publish_grid_map()
+
+    def broadcast_goal(self, resized_map):
+        self.bfs.set_map(resized_map, (self.current_pose.x,self.current_pose.y))
+        x,y = self.bfs.get_destination()
+        point = Point()
+        point.x = x
+        point.y = y
+        self.publisher_goal_point.publish(point)
+
 
 
     def bresenham_line(self, x0, y0, x1, y1):

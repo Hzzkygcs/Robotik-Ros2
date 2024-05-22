@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-from mapping.models.mapconstants import *
+from .mapconstants import *
 
 
 
@@ -48,8 +48,8 @@ class NumpyMap:
         # -1 isntead of +1 because pixel +y is go down meanwhile  cartecius +y is go up
         percentage_y1 = px_y / self.px_height
         percentage_y2 = (px_y+1) / self.px_height
-        y1 = self.min_y + self.act_height * percentage_y1
-        y2 = self.min_y + self.act_height * percentage_y2
+        y1 = self.max_y - self.act_height * percentage_y1  # max_y - something because the higher y_pixel, the lower y_actual. so we reverse it
+        y2 = self.max_y - self.act_height * percentage_y2
 
         ret = Rect(self.min_x + self.act_width * percentage_x,
                    min(y1, y2),
@@ -132,7 +132,7 @@ class NumpyMap:
                 actual_rect_of_ret = ret.px_to_actual_rect((x,y))
                 px_rect_of_self = self.actual_rect_to_px_rect(actual_rect_of_ret)
                 sliced = px_rect_of_self.slice_map(self.canvas)
-                ret.canvas[ret.px_height - y - 1][x] = sliced.max(initial=0)
+                ret.canvas[y][x] = sliced.max(initial=0)
         return ret
 
     def resize_accurate_but_inefficient(self, new_resolution, show_image=False):
@@ -165,7 +165,8 @@ class NumpyMapDisplayer:
     def update_frame(self):
         self._canvas_axes.set_data(apply_thresholding(self.map.canvas))
         plt.pause(0.001)
-        plt.draw()
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
 
     def set_new_map(self, new_map: NumpyMap):
         self.map = new_map
@@ -278,3 +279,15 @@ class Rect:
     def end(self):
         return self.max_x, self.max_y
 
+
+
+### UNIT TESTS
+def unit_test():
+    curr_map = NumpyMap(resolution=0.25)
+    inp = np.array([3.5, 4.5])
+    temp = curr_map.actual_to_px(inp)
+    output = np.array(curr_map.px_to_actual_rect(temp).mid)
+    assert (np.abs((inp - output)) <= 0.25).all()
+
+
+unit_test()
