@@ -16,6 +16,7 @@ TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.33
 MAX_ANGLE_DEGREE_TOWARD_GOAL = 10
+DISTANCE_THRESHOLD_TO_GOAL = 0.25
 
 class Navigate(Node):
     def __init__(self):
@@ -37,6 +38,10 @@ class Navigate(Node):
         self.publisher_goal_point_reached = self.create_publisher(
             Empty,
             '/goal_point/reached',
+            10)
+        self.publisher_goal_point_blocked = self.create_publisher(
+            Empty,
+            '/goal_point/blocked',
             10)
         self.subscription_scan = self.create_subscription(
             LaserScan,
@@ -105,6 +110,7 @@ class Navigate(Node):
             return False
         print(f"Too close!: {predicted_goal_angle}")
         self.robot_go_bakcward(obstacle_on_left)
+        self.publisher_goal_point_blocked.publish(Empty())
         return True
 
 
@@ -115,7 +121,7 @@ class Navigate(Node):
         goal_is_in_left_func = lambda: self.goal_angle() > 0
         self.movement_override = MovementOverride.chain(
             BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1.5),
-            ForwardMovementOverride(lambda: not obstacle_left, 0.5, expire_duration:= expire_duration + 0.5),
+            ForwardMovementOverride(lambda: not obstacle_left, 0.2, expire_duration:= expire_duration + 1.5),
             ForwardMovementOverride(goal_is_in_left_func, 1, expire_duration:= expire_duration + 0.5),
         )
         return True
@@ -140,8 +146,9 @@ class Navigate(Node):
         if twist is not None:
             self.publisher_cmd_vel.publish(twist)
             return
-        if  self.goal_distance() < 0.3:
+        if  self.goal_distance() < DISTANCE_THRESHOLD_TO_GOAL and math.degrees(abs(self.goal_angle())) < 8:
             self.publisher_cmd_vel.publish(Twist())
+            self.handle_arrived()
             return
         goal_angle_deg = math.degrees(self.goal_angle())
         if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:
@@ -153,8 +160,8 @@ class Navigate(Node):
             print(f"Rotating... {goal_angle_deg}")
             self.movement_override = RotateInPlace(rotation)
 
-        # if self.obstacle_avoidance():
-        #     return
+        if self.obstacle_avoidance():
+            return
 
         dx = self.goal_point.x - self.robot_pose.x
         dy = self.goal_point.y - self.robot_pose.y
@@ -178,7 +185,7 @@ class Navigate(Node):
 
         cmd_vel = Twist()
 
-        if distance > 0.3:
+        if distance > DISTANCE_THRESHOLD_TO_GOAL:
             cmd_vel.linear.y = 0.6
 
             print(goal_angle_adjusted, self.robot_pose.theta)
@@ -189,9 +196,8 @@ class Navigate(Node):
         else:
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0
-            if not self.arrived:
-                self.publisher_goal_point_reached.publish(None)
-                self.arrived = True
+            self.handle_arrived()
+
         self.publisher_cmd_vel.publish(cmd_vel)
 
         return True
@@ -199,6 +205,15 @@ class Navigate(Node):
         dx = self.goal_point.x - self.robot_pose.x
         dy = self.goal_point.y - self.robot_pose.y
         return np.sqrt(dx ** 2 + dy ** 2)
+
+    def handle_arrived(self):
+        if self.goal_distance() > DISTANCE_THRESHOLD_TO_GOAL:
+            return
+        if self.arrived:  # if already arrived since previous iteration
+            return
+        print("REACHED GOAL POINT")
+        self.publisher_goal_point_reached.publish(Empty())
+        self.arrived = True
 
 
 def main(args=None):

@@ -25,6 +25,8 @@ class ExplorationBase(abc.ABC):
         pass
 
 
+
+
 class ExplorationSteps(ExplorationBase):
     def __init__(self, *chains):
         self.chains: list = list(chains)
@@ -60,11 +62,7 @@ class ExplorationSteps(ExplorationBase):
     def move_on_to_next_destination(self):
         first_item: ExplorationBase = self.chains[0]
         result = first_item.move_on_to_next_destination()
-        if result is not None:
-            return
-        self.chains.pop(0)
-        chain: ExplorationBase = self.chains[0]
-        chain.set_map(self.numpyMap, self.currentActualPos)
+        return result
 
     def overall_destinations(self):
         return self.chains[0].overall_destinations()
@@ -72,7 +70,7 @@ class ExplorationSteps(ExplorationBase):
 
 class ExploreUnknownMaps(ExplorationBase):
     def __init__(self):
-        self.bfs = DoBfs(self.stoppingCondition)
+        self.bfs = DoBfs(self.stoppingCondition, lambda x,y,value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
 
@@ -99,7 +97,7 @@ class ExploreUnknownMaps(ExplorationBase):
 
 class BfsToDestination(ExplorationBase):
     def __init__(self, destination_actual_coordinate):
-        self.bfs = DoBfs(self.stoppingCondition)
+        self.bfs = DoBfs(self.stoppingCondition, lambda x,y,value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
         self.destination_actual_coordinate = destination_actual_coordinate
@@ -127,12 +125,13 @@ class BfsToDestination(ExplorationBase):
 
 
 class DoBfs(ExplorationBase):
-    def __init__(self, stopping_condition):
+    def __init__(self, stopping_condition, wall_condition):
         self.numpyMap = None
         self.currentActualPos = None
         self.shortest_maps = []
         self.routes = collections.deque()
         self.stopping_condition = stopping_condition
+        self.wall_condition = wall_condition
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple):
         self.routes.clear()
@@ -143,9 +142,10 @@ class DoBfs(ExplorationBase):
                               for y in range(self.numpyMap.px_height)]
         final_node = self.bfs_find_route(self.stopping_condition)
         self.final_node = final_node  # debugging purpose only
+        origin_coord = None
         for pixel_coord in self.backtrack_routes(final_node):
             act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
-            self.routes.appendleft((act_x, act_y))
+            self.routes.appendleft((act_x, act_y, pixel_coord))
             origin_coord = pixel_coord
         self.origin_coord = origin_coord  # debugging purpose only
 
@@ -161,12 +161,14 @@ class DoBfs(ExplorationBase):
         return self.get_destination()
 
     def backtrack_routes(self, final_node: NodeInformation):
+        if final_node is None:
+            return
         curr_node = final_node
         while True:
-            yield curr_node.x, curr_node.y
-            is_origin_point = not curr_node.shortest_distance_initialized
+            is_origin_point = (curr_node.shortest_distance == 0)
             if is_origin_point:
                 return
+            yield curr_node.x, curr_node.y
             backtrack_direction = curr_node.direction_to_source
             dx = DIR_X[backtrack_direction]
             dy = DIR_Y[backtrack_direction]
@@ -200,7 +202,13 @@ class DoBfs(ExplorationBase):
             for next_dir in range(TOTAL_DIRECTION):
                 dx = DIR_X[next_dir]
                 dy = DIR_Y[next_dir]
-                next_node_info: NodeInformation = self.shortest_maps[node_info.y+dy][node_info.x+dx]
+                y = node_info.y+dy
+                x = node_info.x+dx
+                if not (0 <= x < self.numpyMap.px_width) or not(0 <= y < self.numpyMap.px_height):
+                    continue
+                if self.wall_condition(x, y, self.numpyMap.canvas[y][x]):
+                    continue
+                next_node_info: NodeInformation = self.shortest_maps[y][x]
                 queue.push(next_dir, next_node_info)
 
     def overall_destinations(self):

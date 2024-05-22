@@ -7,10 +7,11 @@ from nav_msgs.msg import OccupancyGrid, MapMetaData
 from geometry_msgs.msg import Pose
 import numpy as np
 import time
+import cv2
 
 from std_msgs.msg import Empty
 
-
+from models.mapconstants import ALGORITHM_RESOLUTION
 from models.numpymap import NumpyMap, NumpyMapDisplayer
 from models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
 
@@ -27,10 +28,15 @@ class GridMapBuilder(Node):
             '/hokuyo',
             self.listener_scan,
             10)
-        self.subscription_scan = self.create_subscription(
+        self.subscription_goal_point_reached = self.create_subscription(
             Empty,
             '/goal_point/reached',
             self.goal_point_is_reached,
+            10)
+        self.subscription_goal_point_blocked = self.create_subscription(
+            Empty,
+            '/goal_point/blocked',
+            self.goal_point_is_blocked,
             10)
         self.publisher_goal_point = self.create_publisher(
             Point,
@@ -51,7 +57,7 @@ class GridMapBuilder(Node):
         ax1 = fig.add_subplot(211)
         ax2 = fig.add_subplot(212)
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
-        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(0.25), fig, ax2)
+        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -69,7 +75,14 @@ class GridMapBuilder(Node):
             BfsToDestination((6.275, -2.225)))
 
     def goal_point_is_reached(self, *msg):
-        self.bfs.move_on_to_next_destination()
+        print(f"NEXT DESTINATION. current: {self.bfs.overall_destinations()}")
+        result = self.bfs.move_on_to_next_destination()
+        chance = 100 if result is None else 0
+        self.broadcast_goal(self._resized_map, chance)
+
+    def goal_point_is_blocked(self, *msg):
+        print(f"BLCOKED. REPLANNING PATH. current: {self.bfs.overall_destinations()}")
+        self.broadcast_goal(self._resized_map, 100)
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -97,20 +110,27 @@ class GridMapBuilder(Node):
         for end_x, end_y in zip(x_coords, y_coords):
             self.map.add_raycast(curr_pos, (end_x, end_y))
         self.displayer.update_frame()
-        resized_map = self.map.resize_dilated_but_efficient(0.25)
-        self.displayer_abstract.set_new_map(resized_map).update_frame()
-        self.broadcast_goal(resized_map)
+        self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
+        self._resized_map.canvas = dilation(self._resized_map.canvas)
+        self.displayer_abstract.set_new_map(self._resized_map).update_frame()
+        self.broadcast_goal(self._resized_map)
 
         # Publish the occupancy grid
         self.publish_grid_map()
 
-    def broadcast_goal(self, resized_map):
-        self.bfs.set_map(resized_map, (self.current_pose.x,self.current_pose.y))
-        x,y = self.bfs.get_destination()
+    def broadcast_goal(self, resized_map, chance=0):
+        self.bfs.try_set_map(resized_map, (self.current_pose.x,self.current_pose.y), chance)
+        x,y, _ = self.bfs.get_destination()
+
+        _,_, final_dest = self.bfs.overall_destinations()[-1]
+        if self._resized_map.canvas[final_dest[1]][final_dest[0]]:
+            self.bfs.set_map(resized_map, (x,y))  # replan for new target
+            print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
         point = Point()
         point.x = x
         point.y = y
         self.publisher_goal_point.publish(point)
+        print(f"Publishing {x},{y}   {self._resized_map.x_to_px(x)},{self._resized_map.y_to_px(y)}")
 
 
 
@@ -149,12 +169,20 @@ class GridMapBuilder(Node):
         time.sleep(0.35)
 
 
+def dilation(img):
+    return img
+    # kernel = np.ones((3,3),np.uint8)
+    # return cv2.dilate(img,kernel,iterations = 1)
+
+
+
 def main(args=None):
     rclpy.init(args=args)
     grid_map_builder = GridMapBuilder()
     rclpy.spin(grid_map_builder)
     grid_map_builder.destroy_node()
     rclpy.shutdown()
+
 
 
 if __name__ == '__main__':

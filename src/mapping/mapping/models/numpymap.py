@@ -181,7 +181,7 @@ def apply_dilation(np_canvas_array, copy=True):
 
 def apply_thresholding(np_canvas_array, copy=True):
     canvas = np.copy(np_canvas_array) if copy else np_canvas_array
-    upper_threshold = 130
+    upper_threshold = PATH_OBSTACLE_TRESHOLD
     canvas[np_canvas_array >= upper_threshold] = 255
     canvas[(1 <= np_canvas_array) & (np_canvas_array < upper_threshold)] = 1
     canvas[np_canvas_array == 0] = 124
