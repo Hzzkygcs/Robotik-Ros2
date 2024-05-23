@@ -80,6 +80,10 @@ class Navigate(Node):
         self.robot_pose = msg
         self.robot_pose_received = True
 
+        if not self.goal_point_received:
+            self.goal_point.x = self.robot_pose.x
+            self.goal_point.y = self.robot_pose.y
+
     def goal_point_callback(self, msg):
         self.goal_point = msg
         self.goal_point_received = True
@@ -142,6 +146,7 @@ class Navigate(Node):
 
     def navigate(self):
         # print(f"Received goal point: {self.goal_point}")
+        # print(f"Current position: {self.robot_pose.x, self.robot_pose.y}")
         twist = self.movement_override.twist
         if twist is not None:
             self.publisher_cmd_vel.publish(twist)
