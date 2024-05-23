@@ -9,7 +9,8 @@ import numpy as np
 import time
 import cv2
 
-from std_msgs.msg import Empty
+from mapping.models.numpymap import NumpyMap, apply_thresholding
+from src.mapping.mapping.models.numpymap import NumpyMapDisplayer
 
 from models.mapconstants import ALGORITHM_RESOLUTION
 from models.numpymap import NumpyMap, NumpyMapDisplayer
