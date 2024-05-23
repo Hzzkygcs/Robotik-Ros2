@@ -8,7 +8,7 @@ from geometry_msgs.msg import Pose
 import numpy as np
 import time
 
-from models.numpymap import NumpyMap, apply_thresholding
+from mapping.models.numpymap import NumpyMap, apply_thresholding
 from src.mapping.mapping.models.numpymap import NumpyMapDisplayer
 
 
