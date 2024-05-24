@@ -14,6 +14,7 @@ from mapping.models.mapconstants import ALGORITHM_RESOLUTION
 from mapping.models.numpymap import NumpyMap, NumpyMapDisplayer
 from mapping.models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
 
+
 class GridMapBuilder(Node):
     def __init__(self):
         super().__init__('grid_map_builder')
@@ -53,10 +54,12 @@ class GridMapBuilder(Node):
         self.map = NumpyMap()
 
         fig = plt.figure()
-        ax1 = fig.add_subplot(211)
-        ax2 = fig.add_subplot(212)
+        ax1 = fig.add_subplot()
+        fig.set_figheight(12)
+        fig.set_figwidth(20)
+        # ax2 = fig.add_subplot(212)
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
-        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
+        # self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -72,6 +75,8 @@ class GridMapBuilder(Node):
         self.bfs = ExplorationSteps(
             ExploreUnknownMaps(),
             BfsToDestination((6.275, -2.225)))
+
+        self.is_processing = False
 
     def goal_point_is_reached(self, *msg):
         print(f"NEXT DESTINATION. current: {self.bfs.overall_destinations()}")
@@ -95,6 +100,11 @@ class GridMapBuilder(Node):
         self.publisher_map_robot.publish(msg)
 
     def listener_scan(self, msg):
+        if self.is_processing:
+            print(f"Skipping scan, still processing")
+            return False
+        self.is_processing = True
+
         if self.current_pose is None:
             return
 
@@ -104,34 +114,41 @@ class GridMapBuilder(Node):
         angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
         x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
         y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
-        curr_pos = self.current_pose.x,self.current_pose.y
+        curr_pos = self.current_pose.x, self.current_pose.y
 
         for end_x, end_y in zip(x_coords, y_coords):
             self.map.add_raycast(curr_pos, (end_x, end_y))
-        self.displayer.update_frame()
-        self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
+
+        # update robot position on map - V
+        self.map.robot_pos = self.current_pose
+        # give BFS goals to map
+        if self.bfs is not None:
+            self.map.route = self.bfs.overall_destinations()
+
+        # self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
+        self._resized_map = self.map
         self._resized_map.canvas = dilation(self._resized_map.canvas)
-        self.displayer_abstract.set_new_map(self._resized_map).update_frame()
+        # self.displayer_abstract.set_new_map(self._resized_map).update_frame()
         self.broadcast_goal(self._resized_map)
 
+        self.displayer.update_frame()
         # Publish the occupancy grid
         self.publish_grid_map()
+        self.is_processing = False
 
     def broadcast_goal(self, resized_map, chance=0):
-        self.bfs.try_set_map(resized_map, (self.current_pose.x,self.current_pose.y), chance)
-        x,y, _ = self.bfs.get_destination()
+        self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
+        x, y, _ = self.bfs.get_destination()
 
-        _,_, final_dest = self.bfs.overall_destinations()[-1]
+        _, _, final_dest = self.bfs.overall_destinations()[-1]
         if self._resized_map.canvas[final_dest[1]][final_dest[0]]:
-            self.bfs.set_map(resized_map, (x,y))  # replan for new target
+            self.bfs.set_map(resized_map, (x, y))  # replan for new target
             print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
         point = Point()
         point.x = x
         point.y = y
         self.publisher_goal_point.publish(point)
         print(f"Publishing {x},{y}   {self._resized_map.x_to_px(x)},{self._resized_map.y_to_px(y)}")
-
-
 
     def bresenham_line(self, x0, y0, x1, y1):
         """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""
@@ -153,7 +170,7 @@ class GridMapBuilder(Node):
                 y0 += sy
 
     def publish_grid_map(self):
-        return # TODO
+        return  # TODO
         grid_msg = OccupancyGrid()
         grid_msg.header.stamp = self.get_clock().now().to_msg()
         grid_msg.header.frame_id = "map"
@@ -170,9 +187,8 @@ class GridMapBuilder(Node):
 
 def dilation(img):
     return img
-    # kernel = np.ones((3,3),np.uint8)
-    # return cv2.dilate(img,kernel,iterations = 1)
-
+    # kernel = np.ones((3, 3), np.uint8)
+    # return cv2.dilate(img, kernel, iterations=1)
 
 
 def main(args=None):
@@ -181,7 +197,6 @@ def main(args=None):
     rclpy.spin(grid_map_builder)
     grid_map_builder.destroy_node()
     rclpy.shutdown()
-
 
 
 if __name__ == '__main__':

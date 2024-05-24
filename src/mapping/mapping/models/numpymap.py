@@ -4,15 +4,12 @@ import math
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from geometry_msgs.msg import Pose2D
 
 from .mapconstants import *
 
-
-
-
-
 class NumpyMap:
-    def __init__(self, map_start: tuple[float, float]=MAP_START, map_end: tuple[float, float]=MAP_END,
+    def __init__(self, map_start: tuple[float, float] = MAP_START, map_end: tuple[float, float] = MAP_END,
                  resolution=RESOLUTION, show_image=True):
         self.map_start = map_start
         self.map_end = map_end
@@ -24,8 +21,12 @@ class NumpyMap:
         self.act_height = self.max_y - self.min_y
         self.px_width = math.ceil(self.act_width / resolution)
         self.px_height = math.ceil(self.act_height / resolution)
-        self.px_anchor_x = round(-self.min_x/resolution)
-        self.px_anchor_y = round(-self.min_y/resolution)
+        self.px_anchor_x = round(-self.min_x / resolution)
+        self.px_anchor_y = round(-self.min_y / resolution)
+
+        # V
+        self.robot_pos = None
+        self.route = None
 
         self.canvas = np.full((self.px_height, self.px_width, 1), PATH_UNKNOWN_VALUE, dtype=np.uint8)
 
@@ -43,18 +44,18 @@ class NumpyMap:
     def px_to_actual_rect(self, px: tuple) -> Rect:  # tuple of tuple of float
         px_x, px_y = px
         percentage_x = px_x / self.px_width
-        percentage_x_end = (px_x+1) / self.px_width
+        percentage_x_end = (px_x + 1) / self.px_width
 
         # -1 isntead of +1 because pixel +y is go down meanwhile  cartecius +y is go up
         percentage_y1 = px_y / self.px_height
-        percentage_y2 = (px_y+1) / self.px_height
+        percentage_y2 = (px_y + 1) / self.px_height
         y1 = self.max_y - self.act_height * percentage_y1  # max_y - something because the higher y_pixel, the lower y_actual. so we reverse it
         y2 = self.max_y - self.act_height * percentage_y2
 
         ret = Rect(self.min_x + self.act_width * percentage_x,
                    min(y1, y2),
                    self.min_x + self.act_width * percentage_x_end,
-                    max(y1, y2))
+                   max(y1, y2))
         return ret
 
     def actual_rect_to_px_rect(self, actual_rect: Rect):
@@ -65,7 +66,6 @@ class NumpyMap:
         if y_end < y_start:
             y_start, y_end = y_end, y_start
         return Rect(x_start, y_start, x_end, y_end)
-
 
     def px_to_x(self, px: float) -> float:
         percentage = px / self.px_width
@@ -119,7 +119,12 @@ class NumpyMap:
 
     def draw_circle(self, hit_pos_px):
         for x, y, manhattan in generate_circle_pixels(hit_pos_px, PATH_OBSTACLE_RADIUS):
-            color_addition = 150 / (1+manhattan)
+            if x >= self.px_width:
+                continue
+            if y >= self.px_height:
+                continue
+
+            color_addition = 150 / (1 + manhattan)
             if self.canvas[y][x] <= 255 - color_addition:  # cant use min() because we operate with uint8 [0, 255]
                 self.canvas[y][x] = self.canvas[y][x] + color_addition
             else:
@@ -129,7 +134,7 @@ class NumpyMap:
         ret = NumpyMap(self.map_start, self.map_end, new_resolution, show_image=show_image)
         for x in range(ret.px_width):
             for y in range(ret.px_height):
-                actual_rect_of_ret = ret.px_to_actual_rect((x,y))
+                actual_rect_of_ret = ret.px_to_actual_rect((x, y))
                 px_rect_of_self = self.actual_rect_to_px_rect(actual_rect_of_ret)
                 sliced = px_rect_of_self.slice_map(self.canvas)
                 ret.canvas[y][x] = sliced.max(initial=0)
@@ -152,18 +157,23 @@ class NumpyMap:
         return max_pooling_2d_array(self.canvas, (multiplier, multiplier))
 
 
-
 class NumpyMapDisplayer:
     def __init__(self, map: NumpyMap, fig=None, ax=None):
         self.map = map
         self.fig = plt.figure() if fig is None else fig
-        self.ax = self.fig.add_subplot(2,1,1) if ax is None else ax
-        self._canvas_axes = self.ax.imshow(self.map.canvas, cmap='gray', vmin=0, vmax=255)
+        self.ax = self.fig.add_subplot(2, 1, 1) if ax is None else ax
+        self._canvas_axes = self.ax.imshow(self.map.canvas, cmap='terrain', vmin=0, vmax=255)
         self.fig.show()
 
-
     def update_frame(self):
-        self._canvas_axes.set_data(apply_thresholding(self.map.canvas))
+        copied_canvas = apply_thresholding(self.map.canvas)
+
+        if self.map.robot_pos is not None:
+            copied_canvas = display_robot_on_canvas(copied_canvas, self.map)
+        if self.map.route is not None:
+            copied_canvas = display_route_on_canvas(copied_canvas, self.map)
+
+        self._canvas_axes.set_data(copied_canvas)
         plt.pause(0.001)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
@@ -173,6 +183,33 @@ class NumpyMapDisplayer:
         self.update_frame()
         return self
 
+
+def display_robot_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=True):
+    canvas = np.copy(np_canvas_array) if copy else np_canvas_array
+    raw_x = map.robot_pos.x
+    raw_y = map.robot_pos.y
+    px = map.x_to_px(raw_x)
+    py = map.y_to_px(raw_y)
+
+    robot_pixel_radius = int(ROBOT_RADIUS * (ROBOT_DEFAULT_RES/map.resolution))
+
+    # Draw robot circle
+    for x, y, manhattan in generate_circle_pixels((px, py), robot_pixel_radius):
+        canvas[y][x] = ROBOT_VALUE
+
+    return canvas
+
+def display_route_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=True):
+    canvas = np.copy(np_canvas_array) if copy else np_canvas_array
+    for route in map.route:
+        px = route[2][0]
+        py = route[2][1]
+
+        # Draw waypoints
+        for x, y, manhattan in generate_circle_pixels((px, py), WAYPOINT_RADIUS):
+            canvas[y][x] = WAYPOINT_VALUE
+
+    return canvas
 
 
 def apply_dilation(np_canvas_array, copy=True):
@@ -186,7 +223,6 @@ def apply_thresholding(np_canvas_array, copy=True):
     canvas[(1 <= np_canvas_array) & (np_canvas_array < upper_threshold)] = 1
     canvas[np_canvas_array == 0] = 124
     return canvas
-
 
 
 def max_pooling_2d_array(mat, kernel_size):
@@ -208,11 +244,9 @@ def max_pooling_2d_array(mat, kernel_size):
     return np.vstack([np.c_[Q1, Q3], np.c_[Q2, Q4]])
 
 
-
-
 def generate_circle_pixels(center, radius):  # yield x,y,manhattan distance
-    square_area_of_radius = (1 + (radius-1)*2)**2
-    square_area_of_radius_min_1 = max(0, (1 + (radius-2)*2) ** 2)
+    square_area_of_radius = (1 + (radius - 1) * 2) ** 2
+    square_area_of_radius_min_1 = max(0, (1 + (radius - 2) * 2) ** 2)
     max_number_of_outter_cells = square_area_of_radius - square_area_of_radius_min_1
 
     number_of_degree_rotation = max_number_of_outter_cells // 2 + 1
@@ -229,7 +263,7 @@ def generate_circle_pixels(center, radius):  # yield x,y,manhattan distance
         prev_x = x
         for y in range(y0, y1):
             manhattan_dist = abs(x - center[0]) + abs(y - center[1])
-            yield x,y,manhattan_dist
+            yield x, y, manhattan_dist
 
 
 def bresenham_line(start, end):
@@ -278,7 +312,6 @@ class Rect:
     @property
     def end(self):
         return self.max_x, self.max_y
-
 
 
 ### UNIT TESTS
