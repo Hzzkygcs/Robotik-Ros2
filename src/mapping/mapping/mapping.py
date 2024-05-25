@@ -13,7 +13,7 @@ from std_msgs.msg import String, Empty
 from mapping.models.mapconstants import ALGORITHM_RESOLUTION
 from mapping.models.numpymap import NumpyMap, NumpyMapDisplayer
 from mapping.models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
-
+from mapping.models.mapconstants import *
 
 class GridMapBuilder(Node):
     def __init__(self):
@@ -100,11 +100,6 @@ class GridMapBuilder(Node):
         self.publisher_map_robot.publish(msg)
 
     def listener_scan(self, msg):
-        if self.is_processing:
-            print(f"Skipping scan, still processing")
-            return False
-        self.is_processing = True
-
         if self.current_pose is None:
             return
 
@@ -125,6 +120,15 @@ class GridMapBuilder(Node):
         if self.bfs is not None:
             self.map.route = self.bfs.overall_destinations()
 
+            # reset if waypoint stuck in wall(?)
+            if len(self.map.route) > 0:
+                for route in self.map.route:
+                    px, py = route[2]
+                    if self.map.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
+                        self.bfs.try_set_map(self.map, (self.current_pose.x, self.current_pose.y), 100)
+                        return
+
+
         # self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
         self._resized_map = self.map
         self._resized_map.canvas = dilation(self._resized_map.canvas)
@@ -134,7 +138,6 @@ class GridMapBuilder(Node):
         self.displayer.update_frame()
         # Publish the occupancy grid
         self.publish_grid_map()
-        self.is_processing = False
 
     def broadcast_goal(self, resized_map, chance=0):
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)

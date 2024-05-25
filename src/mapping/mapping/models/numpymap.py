@@ -116,6 +116,8 @@ class NumpyMap:
                 self.canvas[y][x] = PATH_CLEAR_VALUE
             else:
                 self.canvas[y][x] = self.canvas[y][x] - 30
+            # if self.canvas[y][x] != PATH_OBSTACLE_VALUE:
+            #     self.canvas[y][x] = PATH_CLEAR_VALUE
 
     def draw_circle(self, hit_pos_px):
         for x, y, manhattan in generate_circle_pixels(hit_pos_px, PATH_OBSTACLE_RADIUS):

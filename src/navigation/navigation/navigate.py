@@ -14,7 +14,7 @@ from navigation.models.movement_override import BackwardMovementOverride, Forwar
 
 TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
-AVOID_DISTANCE = 0.33
+AVOID_DISTANCE = 0.05
 MAX_ANGLE_DEGREE_TOWARD_GOAL = 10
 DISTANCE_THRESHOLD_TO_GOAL = 0.25
 

@@ -25,8 +25,6 @@ class ExplorationBase(abc.ABC):
         pass
 
 
-
-
 class ExplorationSteps(ExplorationBase):
     def __init__(self, *chains):
         self.chains: list = list(chains)
@@ -41,7 +39,6 @@ class ExplorationSteps(ExplorationBase):
             return
         self.set_map(numpyMap, currentActualPos)
         print(self.overall_destinations())
-
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple):
         self.numpyMap = numpyMap
@@ -70,7 +67,7 @@ class ExplorationSteps(ExplorationBase):
 
 class ExploreUnknownMaps(ExplorationBase):
     def __init__(self):
-        self.bfs = DoBfs(self.stoppingCondition, lambda x,y,value: value >= PATH_OBSTACLE_TRESHOLD)
+        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
 
@@ -94,10 +91,9 @@ class ExploreUnknownMaps(ExplorationBase):
         return self.bfs.overall_destinations()
 
 
-
 class BfsToDestination(ExplorationBase):
     def __init__(self, destination_actual_coordinate):
-        self.bfs = DoBfs(self.stoppingCondition, lambda x,y,value: value >= PATH_OBSTACLE_TRESHOLD)
+        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
         self.destination_actual_coordinate = destination_actual_coordinate
@@ -123,7 +119,6 @@ class BfsToDestination(ExplorationBase):
         return self.bfs.overall_destinations()
 
 
-
 class DoBfs(ExplorationBase):
     def __init__(self, stopping_condition, wall_condition):
         self.numpyMap = None
@@ -143,7 +138,13 @@ class DoBfs(ExplorationBase):
         final_node = self.bfs_find_route(self.stopping_condition)
         self.final_node = final_node  # debugging purpose only
         origin_coord = None
-        for pixel_coord in self.backtrack_routes(final_node):
+
+        last_direction = None
+        for node_x, node_y, node_direction_to_source in self.backtrack_routes(final_node):
+            if node_direction_to_source == last_direction:
+                continue
+            last_direction = node_direction_to_source
+            pixel_coord = (node_x, node_y)
             act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
             self.routes.appendleft((act_x, act_y, pixel_coord))
             origin_coord = pixel_coord
@@ -168,11 +169,11 @@ class DoBfs(ExplorationBase):
             is_origin_point = (curr_node.shortest_distance == 0)
             if is_origin_point:
                 return
-            yield curr_node.x, curr_node.y
+            yield curr_node.x, curr_node.y, curr_node.direction_to_source
             backtrack_direction = curr_node.direction_to_source
             dx = DIR_X[backtrack_direction]
             dy = DIR_Y[backtrack_direction]
-            curr_node = self.shortest_maps[curr_node.y+dy][curr_node.x+dx]
+            curr_node = self.shortest_maps[curr_node.y + dy][curr_node.x + dx]
 
     def bfs_find_route(self, stopping_condition, empty_value=None):
         numpyMap = self.numpyMap
@@ -202,9 +203,9 @@ class DoBfs(ExplorationBase):
             for next_dir in range(TOTAL_DIRECTION):
                 dx = DIR_X[next_dir]
                 dy = DIR_Y[next_dir]
-                y = node_info.y+dy
-                x = node_info.x+dx
-                if not (0 <= x < self.numpyMap.px_width) or not(0 <= y < self.numpyMap.px_height):
+                y = node_info.y + dy
+                x = node_info.x + dx
+                if not (0 <= x < self.numpyMap.px_width) or not (0 <= y < self.numpyMap.px_height):
                     continue
                 if self.wall_condition(x, y, self.numpyMap.canvas[y][x]):
                     continue
@@ -215,12 +216,6 @@ class DoBfs(ExplorationBase):
         return self.routes
 
 
-
-
-
-
-
-
 class BfsQueue:
     def __init__(self):
         self.queue = collections.deque()
@@ -228,9 +223,8 @@ class BfsQueue:
         self.new_distance(initializeOnly=True)
         self.currentItem: list = self.queue.popleft()
 
-
     def pop_item_at_current_distance(self, index):
-        for i in range(TOTAL_DIRECTION//2 + 1):
+        for i in range(TOTAL_DIRECTION // 2 + 1):
             curr_direction = (index + i) % TOTAL_DIRECTION
             curr_item: list = self.currentItem[curr_direction]
             if len(curr_item) > 0:
@@ -254,7 +248,8 @@ class BfsQueue:
             self.currentDistance += 1
 
     def is_current_distance_empty(self):
-        return all(map(lambda x: len(x)==0, self.currentItem))
+        return all(map(lambda x: len(x) == 0, self.currentItem))
+
 
 class NodeInformation:
     def __init__(self, x, y):
@@ -273,4 +268,3 @@ class NodeInformation:
         self.shortest_distance = shortest_distance
         self.direction_to_here = direction_to_here
         self.shortest_distance_initialized = True
-
