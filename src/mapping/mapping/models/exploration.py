@@ -209,15 +209,16 @@ class DoBfs(ExplorationBase):
                 queue.to_next_distance()
             curr_node = queue.pop_item_at_current_distance(direction)
             if curr_node is None:  # queue empty, no more BFS
-                assert False  # remove this if Exploration unknown cells no longer has bug
+                assert False, "Probably all map has been explored"  # remove this if Exploration unknown cells no longer has bug
                 return empty_value
             node_info: NodeInformation = curr_node[0]
             direction: int = curr_node[1]
-            if node_info.shortest_distance <= queue.currentDistance:
+            distance = queue.currentDistance + (0.5 if is_diagonal(direction) else 0)  # to prioritize non-diagonal when possible
+            if node_info.shortest_distance <= distance:
                 continue
             if allow_wall:  # allow wall will be set to False at the first time a non-wall cell is met
                 allow_wall = self.wall_condition(*node_info.xy, self.numpyMap.get_px(node_info.xy))
-            node_info.set_shortest_distance(queue.currentDistance, direction)
+            node_info.set_shortest_distance(distance, direction)
             if stopping_condition(node_info):
                 return node_info
             for next_dir in range(TOTAL_DIRECTION):

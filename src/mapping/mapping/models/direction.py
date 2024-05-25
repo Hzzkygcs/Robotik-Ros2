@@ -40,3 +40,8 @@ DIR_Y = {
 }
 
 TOTAL_DIRECTION = 8
+
+
+def is_diagonal(direction):
+    return direction in (NE, SE, SW, NW)
+
