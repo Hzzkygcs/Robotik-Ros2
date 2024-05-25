@@ -113,7 +113,7 @@ class Navigate(Node):
         if short_distance > avoid_distance:
             return False
         print(f"Too close!: {predicted_goal_angle}")
-        self.robot_go_bakcward(obstacle_on_left)
+        # self.robot_go_bakcward(obstacle_on_left)
         self.publisher_goal_point_blocked.publish(Empty())
         return True
 
@@ -165,8 +165,9 @@ class Navigate(Node):
             print(f"Rotating... {goal_angle_deg}")
             self.movement_override = RotateInPlace(rotation)
 
-        if self.obstacle_avoidance():
-            return
+        # self.obstacle_avoidance()
+        # if self.obstacle_avoidance():
+        #     return
 
         dx = self.goal_point.x - self.robot_pose.x
         dy = self.goal_point.y - self.robot_pose.y

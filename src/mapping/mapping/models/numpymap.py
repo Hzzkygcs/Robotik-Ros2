@@ -34,6 +34,9 @@ class NumpyMap:
         pixel_coordinate = self.actual_to_px(actual_coordinate)
         return self.canvas[pixel_coordinate[1]][pixel_coordinate[0]]
 
+    def get_px(self, coordinate):
+        return self.canvas[coordinate[1]][coordinate[0]]
+
     def set(self, actual_coordinate, value):
         pixel_coordinate = self.actual_to_px(actual_coordinate)
         self.canvas[pixel_coordinate[1]][pixel_coordinate[0]] = value
@@ -104,14 +107,23 @@ class NumpyMap:
             return self.px_height - 1
         return ret
 
-    def add_raycast(self, position, hit_pos):
+    def add_raycast(self, position, hit_pos, add_obstacle):
         position_px = self.actual_to_px(position)
         hit_pos_px = self.actual_to_px(hit_pos)
+        # end_of_line_of_sight_pos = self.actual_to_px(magnitude_multiplier(position, hit_pos))
+        path_clear_length = line_length(position_px, hit_pos_px)# - PATH_OBSTACLE_RADIUS
+        # if path_clear_length > 0:
         self.draw_line(position_px, hit_pos_px)
-        self.draw_circle(hit_pos_px)
+        # self.draw_line(position_px, magnitude(position_px, hit_pos_px, path_clear_length))
+        if add_obstacle:
+            self.draw_circle(hit_pos_px)
+        self.substract_circle(position_px)
 
     def draw_line(self, position_px, hit_pos_px):
+        assert all(map(lambda x: isinstance(x, int), position_px+hit_pos_px))
         for x, y in bresenham_line(position_px, hit_pos_px):
+            if not (0 <= x < self.px_width and 0 <= y < self.px_height):
+                continue
             if self.canvas[y][x] <= 30:  # cant use max() because we operate with uint8 [0,255] that cant have negative
                 self.canvas[y][x] = PATH_CLEAR_VALUE
             else:
@@ -131,6 +143,18 @@ class NumpyMap:
                 self.canvas[y][x] = self.canvas[y][x] + color_addition
             else:
                 self.canvas[y][x] = 255
+
+    def substract_circle(self, center_pos):
+        for x, y, manhattan in generate_circle_pixels(center_pos, ROBOT_RADIUS):
+            if x >= self.px_width:
+                continue
+            if y >= self.px_height:
+                continue
+            color_decrement = 30
+            if self.canvas[y][x] > color_decrement:  # cant use min() because we operate with uint8 [0, 255]
+                self.canvas[y][x] = self.canvas[y][x] - color_decrement
+            else:
+                self.canvas[y][x] = PATH_CLEAR_VALUE
 
     def resize_dilated_but_efficient(self, new_resolution, show_image=False):
         ret = NumpyMap(self.map_start, self.map_end, new_resolution, show_image=show_image)
@@ -162,13 +186,15 @@ class NumpyMap:
 class NumpyMapDisplayer:
     def __init__(self, map: NumpyMap, fig=None, ax=None):
         self.map = map
+        self.destinations = []
         self.fig = plt.figure() if fig is None else fig
         self.ax = self.fig.add_subplot(2, 1, 1) if ax is None else ax
-        self._canvas_axes = self.ax.imshow(self.map.canvas, cmap='terrain', vmin=0, vmax=255)
+        self._canvas_axes = self.ax.imshow(self.map.canvas, vmin=0, vmax=255)
         self.fig.show()
 
     def update_frame(self):
-        copied_canvas = apply_thresholding(self.map.canvas)
+        copied_canvas = to_rgb(apply_thresholding(self.map.canvas))
+        self.draw_destinations(copied_canvas)
 
         if self.map.robot_pos is not None:
             copied_canvas = display_robot_on_canvas(copied_canvas, self.map)
@@ -185,6 +211,41 @@ class NumpyMapDisplayer:
         self.update_frame()
         return self
 
+    def set_destinations(self, destinations):
+        self.destinations = destinations
+
+    def draw_destinations(self, copied_canvas):
+        for i in range(len(self.destinations)-1):
+            (prev_act_x, prev_act_y, _) = self.destinations[i]
+            (act_x, act_y, _) = self.destinations[i+1]
+            prev_px_x, prev_px_y = self.map.actual_to_px((prev_act_x, prev_act_y))
+            px_x, px_y = self.map.actual_to_px((act_x, act_y))
+            cv2.line(copied_canvas, (prev_px_x,prev_px_y),(px_x, px_y), (0, 122, 255), thickness=6)
+            cv2.circle(copied_canvas, (px_x, px_y), 2, (0, 255, 0), thickness=10)
+
+
+
+def line_length(start, end):
+    dx = start[0] - end[0]
+    dy = start[1] - end[1]
+    length = math.sqrt(dx * dx + dy * dy)
+    return length
+
+
+def magnitude(start, end, magnitude):
+    dx = start[0] - end[0]
+    dy = start[1] - end[1]
+    angle = math.atan2(dy, dx)
+    ret_x = start[0] + math.cos(angle) * magnitude
+    ret_y = start[1] + math.sin(angle) * magnitude
+    return round(ret_x), round(ret_y)
+
+def to_rgb(im):
+    w, h, *_ = im.shape
+    ret = np.empty((w, h, 3), dtype=np.uint8)
+    ret[:, :, :] = im
+    ret[:, :, 1] = ret[:, :, 2] = ret[:, :, 0]
+    return ret
 
 def display_robot_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=True):
     canvas = np.copy(np_canvas_array) if copy else np_canvas_array
@@ -194,10 +255,11 @@ def display_robot_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=Tru
     py = map.y_to_px(raw_y)
 
     robot_pixel_radius = int(ROBOT_RADIUS * (ROBOT_DEFAULT_RES/map.resolution))
+    cv2.circle(canvas, (px, py), robot_pixel_radius, (255, 0, 0), -1)
 
     # Draw robot circle
-    for x, y, manhattan in generate_circle_pixels((px, py), robot_pixel_radius):
-        canvas[y][x] = ROBOT_VALUE
+    # for x, y, manhattan in generate_circle_pixels((px, py), robot_pixel_radius):
+    #     canvas[y][x] = ROBOT_VALUE
 
     return canvas
 

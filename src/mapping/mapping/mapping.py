@@ -10,10 +10,10 @@ import time
 import cv2
 
 from std_msgs.msg import String, Empty
-from mapping.models.mapconstants import ALGORITHM_RESOLUTION
-from mapping.models.numpymap import NumpyMap, NumpyMapDisplayer
-from mapping.models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
-from mapping.models.mapconstants import *
+from models.mapconstants import ALGORITHM_RESOLUTION
+from models.numpymap import NumpyMap, NumpyMapDisplayer
+from models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
+from models.mapconstants import *
 
 class GridMapBuilder(Node):
     def __init__(self):
@@ -52,14 +52,16 @@ class GridMapBuilder(Node):
             10)
 
         self.map = NumpyMap()
+        self._resized_map = None
 
         fig = plt.figure()
-        ax1 = fig.add_subplot()
-        fig.set_figheight(12)
-        fig.set_figwidth(20)
-        # ax2 = fig.add_subplot(212)
+        ax1 = fig.add_subplot(211)
+        size_divider = 3
+        fig.set_figheight(20 / size_divider)
+        fig.set_figwidth(15 / size_divider)
+        ax2 = fig.add_subplot(212)
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
-        # self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
+        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -85,8 +87,8 @@ class GridMapBuilder(Node):
         self.broadcast_goal(self._resized_map, chance)
 
     def goal_point_is_blocked(self, *msg):
-        print(f"BLCOKED. REPLANNING PATH. current: {self.bfs.overall_destinations()}")
-        self.broadcast_goal(self._resized_map, 100)
+        print(f"BLOCKED. REPLANNING PATH. current: {self.bfs.overall_destinations()}")
+        # self.broadcast_goal(self._resized_map, 100)
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -104,18 +106,26 @@ class GridMapBuilder(Node):
             return
 
         # Calculate occupied points from laser scan
-        valid_distances = np.array(msg.ranges) < msg.range_max
-        distances = np.array(msg.ranges)[valid_distances]
-        angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))[valid_distances]
+        # valid_distances = np.array(msg.ranges) < msg.range_max
+        distances = np.array(msg.ranges)
+        angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))
         x_coords = distances * np.cos(angles + self.current_pose.theta) + self.current_pose.x
         y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
         curr_pos = self.current_pose.x, self.current_pose.y
 
-        for end_x, end_y in zip(x_coords, y_coords):
-            self.map.add_raycast(curr_pos, (end_x, end_y))
+        for end_x, end_y, distance in zip(x_coords, y_coords, distances):
+            self.map.add_raycast(curr_pos, (end_x, end_y), distance < msg.range_max)
 
         # update robot position on map - V
         self.map.robot_pos = self.current_pose
+
+        # self._resized_map = self.map
+        self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
+
+        self._resized_map.canvas = dilation(self._resized_map.canvas)
+        self.displayer_abstract.set_new_map(self._resized_map).update_frame()
+        self.displayer.update_frame()
+
         # give BFS goals to map
         if self.bfs is not None:
             self.map.route = self.bfs.overall_destinations()
@@ -125,23 +135,18 @@ class GridMapBuilder(Node):
                 for route in self.map.route:
                     px, py = route[2]
                     if self.map.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
-                        self.bfs.try_set_map(self.map, (self.current_pose.x, self.current_pose.y), 100)
+                        self.bfs.try_set_map(self._resized_map, (self.current_pose.x, self.current_pose.y), 100)
                         return
 
 
-        # self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
-        self._resized_map = self.map
-        self._resized_map.canvas = dilation(self._resized_map.canvas)
-        # self.displayer_abstract.set_new_map(self._resized_map).update_frame()
         self.broadcast_goal(self._resized_map)
-
-        self.displayer.update_frame()
         # Publish the occupancy grid
         self.publish_grid_map()
 
     def broadcast_goal(self, resized_map, chance=0):
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
         x, y, _ = self.bfs.get_destination()
+        self.displayer.set_destinations(self.bfs.overall_destinations())
 
         _, _, final_dest = self.bfs.overall_destinations()[-1]
         if self._resized_map.canvas[final_dest[1]][final_dest[0]]:

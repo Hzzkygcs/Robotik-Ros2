@@ -52,7 +52,10 @@ class ExplorationSteps(ExplorationBase):
             curr_destination = chain.get_destination()
             if curr_destination is not None:
                 return curr_destination
+            assert False
             self.chains.pop(0)  # would be better to use queue tho
+            if len(self.chains) == 0:
+                breakpoint()
             chain: ExplorationBase = self.chains[0]
             chain.set_map(self.numpyMap, self.currentActualPos)
 
@@ -133,22 +136,32 @@ class DoBfs(ExplorationBase):
         self.numpyMap = numpyMap
         self.currentActualPos = currentActualPos
         self.currentPos = numpyMap.actual_to_px(self.currentActualPos)
+        self.initialPositionIsWall = self.wall_condition(self.currentPos[0], self.currentPos[1],
+                                                         numpyMap.canvas[self.currentPos[1]][self.currentPos[0]])
         self.shortest_maps = [[NodeInformation(x, y) for x in range(self.numpyMap.px_width)]
                               for y in range(self.numpyMap.px_height)]
         final_node = self.bfs_find_route(self.stopping_condition)
         self.final_node = final_node  # debugging purpose only
         origin_coord = None
-
-        last_direction = None
-        for node_x, node_y, node_direction_to_source in self.backtrack_routes(final_node):
-            if node_direction_to_source == last_direction:
-                continue
-            last_direction = node_direction_to_source
-            pixel_coord = (node_x, node_y)
+        for pixel_coord in self.backtrack_routes(final_node):
             act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
             self.routes.appendleft((act_x, act_y, pixel_coord))
             origin_coord = pixel_coord
         self.origin_coord = origin_coord  # debugging purpose only
+        # final_node = self.bfs_find_route(self.stopping_condition)
+        # self.final_node = final_node  # debugging purpose only
+        # origin_coord = None
+        #
+        # last_direction = None
+        # for node_x, node_y, node_direction_to_source in self.backtrack_routes(final_node):
+        #     if node_direction_to_source == last_direction:
+        #         continue
+        #     last_direction = node_direction_to_source
+        #     pixel_coord = (node_x, node_y)
+        #     act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
+        #     self.routes.appendleft((act_x, act_y, pixel_coord))
+        #     origin_coord = pixel_coord
+        # self.origin_coord = origin_coord  # debugging purpose only
 
     def get_destination(self) -> tuple:
         if len(self.routes) == 0:
@@ -165,11 +178,14 @@ class DoBfs(ExplorationBase):
         if final_node is None:
             return
         curr_node = final_node
+        last_direction = False
         while True:
             is_origin_point = (curr_node.shortest_distance == 0)
             if is_origin_point:
                 return
-            yield curr_node.x, curr_node.y, curr_node.direction_to_source
+            if curr_node.direction_to_here != last_direction:
+                yield curr_node.x, curr_node.y # , curr_node.direction_to_source
+                last_direction = curr_node.direction_to_here
             backtrack_direction = curr_node.direction_to_source
             dx = DIR_X[backtrack_direction]
             dy = DIR_Y[backtrack_direction]
@@ -185,6 +201,7 @@ class DoBfs(ExplorationBase):
         direction = West
         queue.push(direction, initial_origin)
         queue.new_distance(initializeOnly=True)  # starts from 0 distance for the origin itself
+        allow_wall = self.initialPositionIsWall
 
         while True:
             if queue.is_current_distance_empty():
@@ -192,11 +209,14 @@ class DoBfs(ExplorationBase):
                 queue.to_next_distance()
             curr_node = queue.pop_item_at_current_distance(direction)
             if curr_node is None:  # queue empty, no more BFS
+                assert False  # remove this if Exploration unknown cells no longer has bug
                 return empty_value
             node_info: NodeInformation = curr_node[0]
             direction: int = curr_node[1]
             if node_info.shortest_distance <= queue.currentDistance:
                 continue
+            if allow_wall:  # allow wall will be set to False at the first time a non-wall cell is met
+                allow_wall = self.wall_condition(*node_info.xy, self.numpyMap.get_px(node_info.xy))
             node_info.set_shortest_distance(queue.currentDistance, direction)
             if stopping_condition(node_info):
                 return node_info
@@ -207,7 +227,7 @@ class DoBfs(ExplorationBase):
                 x = node_info.x + dx
                 if not (0 <= x < self.numpyMap.px_width) or not (0 <= y < self.numpyMap.px_height):
                     continue
-                if self.wall_condition(x, y, self.numpyMap.canvas[y][x]):
+                if self.wall_condition(x, y, self.numpyMap.canvas[y][x]) and not allow_wall:
                     continue
                 next_node_info: NodeInformation = self.shortest_maps[y][x]
                 queue.push(next_dir, next_node_info)
@@ -268,3 +288,7 @@ class NodeInformation:
         self.shortest_distance = shortest_distance
         self.direction_to_here = direction_to_here
         self.shortest_distance_initialized = True
+
+    @property
+    def xy(self):
+        return self.x, self.y
