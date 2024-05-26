@@ -198,7 +198,7 @@ class DoBfs(ExplorationBase):
             return
         queue = BfsQueue()
         initial_origin: NodeInformation = self.shortest_maps[self.currentPos[1]][self.currentPos[0]]
-        direction = West
+        direction = South
         queue.push(direction, initial_origin)
         queue.new_distance(initializeOnly=True)  # starts from 0 distance for the origin itself
         allow_wall = self.initialPositionIsWall

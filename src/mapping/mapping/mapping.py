@@ -1,3 +1,5 @@
+import itertools
+
 import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
@@ -61,6 +63,7 @@ class GridMapBuilder(Node):
         fig.set_figwidth(15 / size_divider)
         ax2 = fig.add_subplot(212)
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
+        self.displayer.update_frame()
         self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
 
         # Grid map parameters
@@ -84,11 +87,15 @@ class GridMapBuilder(Node):
         print(f"NEXT DESTINATION. current: {self.bfs.overall_destinations()}")
         result = self.bfs.move_on_to_next_destination()
         chance = 100 if result is None else 0
-        self.broadcast_goal(self._resized_map, chance)
+        self.broadcast_goal(self.map_for_bfs, chance)
 
     def goal_point_is_blocked(self, *msg):
         print(f"BLOCKED. REPLANNING PATH. current: {self.bfs.overall_destinations()}")
         # self.broadcast_goal(self._resized_map, 100)
+
+    @property
+    def map_for_bfs(self):
+        return self._resized_map
 
     def listener_pose(self, msg):
         self.current_pose = msg
@@ -122,8 +129,8 @@ class GridMapBuilder(Node):
         # self._resized_map = self.map
         self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
 
-        self._resized_map.canvas = dilation(self._resized_map.canvas)
-        self.displayer_abstract.set_new_map(self._resized_map).update_frame()
+        self.map_for_bfs.canvas = dilation(self.map_for_bfs.canvas)
+        self.displayer_abstract.set_new_map(self.map_for_bfs).update_frame()
         self.displayer.update_frame()
 
         # give BFS goals to map
@@ -132,10 +139,13 @@ class GridMapBuilder(Node):
 
             # reset if waypoint stuck in wall(?)
             if len(self.map.route) > 0:
-                for route in self.map.route:
-                    px, py = route[2]
-                    if self.map.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
-                        self.bfs.try_set_map(self._resized_map, (self.current_pose.x, self.current_pose.y), 100)
+                curr_pos = self.map_for_bfs.actual_to_px((self.current_pose.x, self.current_pose.y))
+                next_destination = self.bfs.overall_destinations()[0][2]
+                line_to_next_dest = list(self.bresenham_line(curr_pos[0], curr_pos[1], next_destination[0], next_destination[1]))
+                for route in itertools.chain(map(lambda x: x[2], self.map.route), line_to_next_dest):
+                    px, py = route
+                    if self.map_for_bfs.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
+                        self.bfs.try_set_map(self.map_for_bfs, (self.current_pose.x, self.current_pose.y), 100)
                         return
 
 
@@ -149,17 +159,21 @@ class GridMapBuilder(Node):
         self.displayer.set_destinations(self.bfs.overall_destinations())
 
         _, _, final_dest = self.bfs.overall_destinations()[-1]
-        if self._resized_map.canvas[final_dest[1]][final_dest[0]]:
+        if self.map_for_bfs.canvas[final_dest[1]][final_dest[0]]:
             self.bfs.set_map(resized_map, (x, y))  # replan for new target
             print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
         point = Point()
         point.x = x
         point.y = y
         self.publisher_goal_point.publish(point)
-        print(f"Publishing {x},{y}   {self._resized_map.x_to_px(x)},{self._resized_map.y_to_px(y)}")
+        print(f"Publishing {x},{y}   {self.map_for_bfs.x_to_px(x)},{self.map_for_bfs.y_to_px(y)}")
 
     def bresenham_line(self, x0, y0, x1, y1):
         """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""
+        assert isinstance(x0, int)
+        assert isinstance(y0, int)
+        assert isinstance(x1, int)
+        assert isinstance(y1, int)
         dx = abs(x1 - x0)
         dy = -abs(y1 - y0)
         sx = 1 if x0 < x1 else -1

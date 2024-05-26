@@ -9,14 +9,19 @@ from std_msgs.msg import String, Empty
 
 import numpy as np
 
-from navigation.models.movement_override import BackwardMovementOverride, ForwardMovementOverride, MovementOverride, \
+from models.movement_override import BackwardMovementOverride, ForwardMovementOverride, MovementOverride, \
     NopMovementOverride, RotateInPlace
+
+from src.navigation.navigation.models.straightvirtualraycast import StraightVirtualRayCast
 
 TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.05
-MAX_ANGLE_DEGREE_TOWARD_GOAL = 10
+MAX_ANGLE_DEGREE_TOWARD_GOAL = 70
 DISTANCE_THRESHOLD_TO_GOAL = 0.15
+
+OBSTACLE_AVOID_RAYCAST_LENGTH = 0.8
+GO_BACKWARD_OBSTACLE_DIST = 0.2
 
 class Navigate(Node):
     def __init__(self):
@@ -57,6 +62,7 @@ class Navigate(Node):
 
         self.timer = self.create_timer(TICK_RATE, self.navigate)
 
+        self.straight_raycast = StraightVirtualRayCast(OBSTACLE_AVOID_RAYCAST_LENGTH)
         self.laser_scan = LaserScan()
         self.laser_scan_received = False
 
@@ -88,8 +94,9 @@ class Navigate(Node):
         self.goal_point = msg
         self.goal_point_received = True
         self.arrived = False
+        print("new goal point received")
 
-    def obstacle_avoidance(self):
+    def update_straight_raycast(self):
         short_distance = float('inf')
         predicted_goal_angle = 0
 
@@ -98,24 +105,26 @@ class Navigate(Node):
 
         distances = np.array(self.laser_scan.ranges)
         angles = np.linspace(self.laser_scan.angle_min, self.laser_scan.angle_max, len(self.laser_scan.ranges))
-        shortest = distances.argmin()
-        short_angle = angles[shortest]  # Left of robot is positive, right of robot is negative, 0 is front
-        short_distance = distances[shortest]
-
-        shortest_direction_absolute = (self.robot_pose.theta + short_angle) % 6.28
-        predicted_goal_angle = shortest_direction_absolute
-        if predicted_goal_angle > 3.14:  # Direction relative to robot closest to obstacle
-            predicted_goal_angle += -6.28
-        obstacle_on_left = short_angle > 0
-        avoid_distance = 0.33
-        too_close = False
-
-        if short_distance > avoid_distance:
-            return False
-        print(f"Too close!: {predicted_goal_angle}")
-        # self.robot_go_bakcward(obstacle_on_left)
-        self.publisher_goal_point_blocked.publish(Empty())
-        return True
+        self.straight_raycast.obstacle_hits = distances, angles
+        #
+        # shortest = distances.argmin()
+        # short_angle = angles[shortest]  # Left of robot is positive, right of robot is negative, 0 is front
+        # short_distance = distances[shortest]
+        #
+        # shortest_direction_absolute = (self.robot_pose.theta + short_angle) % 6.28
+        # predicted_goal_angle = shortest_direction_absolute
+        # if predicted_goal_angle > 3.14:  # Direction relative to robot closest to obstacle
+        #     predicted_goal_angle += -6.28
+        # obstacle_on_left = short_angle > 0
+        # avoid_distance = 0.33
+        # too_close = False
+        #
+        # if short_distance > avoid_distance:
+        #     return False
+        # print(f"Too close!: {predicted_goal_angle}")
+        # # self.robot_go_bakcward(obstacle_on_left)
+        # self.publisher_goal_point_blocked.publish(Empty())
+        # return True
 
 
     def robot_go_bakcward(self, obstacle_left):
@@ -155,6 +164,7 @@ class Navigate(Node):
             self.publisher_cmd_vel.publish(Twist())
             self.handle_arrived()
             return
+
         goal_angle_deg = math.degrees(self.goal_angle())
         if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:
             def rotation():
@@ -165,7 +175,7 @@ class Navigate(Node):
             print(f"Rotating... {goal_angle_deg}")
             self.movement_override = RotateInPlace(rotation)
 
-        # self.obstacle_avoidance()
+        self.update_straight_raycast()
         # if self.obstacle_avoidance():
         #     return
 
@@ -188,6 +198,21 @@ class Navigate(Node):
             theta -= 2 * np.pi
         while theta < -np.pi:
             theta += 2 * np.pi
+
+        closest_overall = self.straight_raycast.closest_overall
+        if closest_overall is not None:
+            obstacle_at_left = closest_overall[0] < 0
+            magnitude = 9 - 4 * closest_overall[1]/OBSTACLE_AVOID_RAYCAST_LENGTH
+            assert magnitude >= 0
+            if obstacle_at_left and theta > 0:  # if obstacle on left and we're heading left
+                theta = math.radians(-5 * magnitude)  # go to slightly right
+                # self.movement_override = NopMovementOverride()
+            elif not obstacle_at_left and theta < 0:  # if obstacle on right and we're heading right
+                theta = math.radians(5 * magnitude)  # go to slightly left
+                # self.movement_override = NopMovementOverride()
+            if closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST:
+                self.robot_go_bakcward(obstacle_at_left)
+
 
         cmd_vel = Twist()
 
