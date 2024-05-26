@@ -21,7 +21,8 @@ MAX_ANGLE_DEGREE_TOWARD_GOAL = 70
 DISTANCE_THRESHOLD_TO_GOAL = 0.15
 
 OBSTACLE_AVOID_RAYCAST_LENGTH = 0.8
-GO_BACKWARD_OBSTACLE_DIST = 0.2
+GO_BACKWARD_OBSTACLE_DIST = 0.27
+SPEED_MULTIPLIER = 1 / 0.6
 
 class Navigate(Node):
     def __init__(self):
@@ -203,6 +204,7 @@ class Navigate(Node):
         if closest_overall is not None:
             obstacle_at_left = closest_overall[0] < 0
             magnitude = 9 - 4 * closest_overall[1]/OBSTACLE_AVOID_RAYCAST_LENGTH
+            magnitude *= SPEED_MULTIPLIER
             assert magnitude >= 0
             if obstacle_at_left and theta > 0:  # if obstacle on left and we're heading left
                 theta = math.radians(-5 * magnitude)  # go to slightly right
@@ -217,7 +219,7 @@ class Navigate(Node):
         cmd_vel = Twist()
 
         if distance > DISTANCE_THRESHOLD_TO_GOAL:
-            cmd_vel.linear.y = 0.6
+            cmd_vel.linear.y = 0.6  * SPEED_MULTIPLIER
 
             print(goal_angle_adjusted, self.robot_pose.theta)
             # if abs(goal_angle_adjusted - self.robot_pose.theta) < 0.2:  # Only move when facing the correct direction

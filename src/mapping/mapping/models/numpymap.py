@@ -128,21 +128,27 @@ class NumpyMap:
                 self.canvas[y][x] = PATH_CLEAR_VALUE
             else:
                 self.canvas[y][x] = self.canvas[y][x] - 30
-            # if self.canvas[y][x] != PATH_OBSTACLE_VALUE:
-            #     self.canvas[y][x] = PATH_CLEAR_VALUE
+
 
     def draw_circle(self, hit_pos_px):
-        for x, y, manhattan in generate_circle_pixels(hit_pos_px, PATH_OBSTACLE_RADIUS):
-            if x >= self.px_width:
-                continue
-            if y >= self.px_height:
-                continue
+        addition = np.zeros(self.canvas.shape, dtype=self.canvas.dtype)
+        color = 140
+        cv2.circle(addition, hit_pos_px, PATH_OBSTACLE_RADIUS, color // 3)
+        cv2.circle(addition, hit_pos_px, PATH_OBSTACLE_RADIUS // 3, color)
+        self.canvas += addition
+        self.canvas[self.canvas < addition] = 255  # avoid overflow https://stackoverflow.com/a/29612541/7069108
 
-            color_addition = 150 / (1 + manhattan)
-            if self.canvas[y][x] <= 255 - color_addition:  # cant use min() because we operate with uint8 [0, 255]
-                self.canvas[y][x] = self.canvas[y][x] + color_addition
-            else:
-                self.canvas[y][x] = 255
+        # for x, y, manhattan in generate_circle_pixels(hit_pos_px, PATH_OBSTACLE_RADIUS):
+        #     if x >= self.px_width:
+        #         continue
+        #     if y >= self.px_height:
+        #         continue
+        #
+        #     color_addition = 150 / (1 + manhattan)
+        #     if self.canvas[y][x] <= 255 - color_addition:  # cant use min() because we operate with uint8 [0, 255]
+        #         self.canvas[y][x] = self.canvas[y][x] + color_addition
+        #     else:
+        #         self.canvas[y][x] = 255
 
     def substract_circle(self, center_pos):
         for x, y, manhattan in generate_circle_pixels(center_pos, ROBOT_RADIUS):

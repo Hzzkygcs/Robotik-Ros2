@@ -24,6 +24,9 @@ class ExplorationBase(abc.ABC):
     def overall_destinations(self):
         pass
 
+    def redo_bfs(self):
+        raise NotImplementedError
+
 
 class ExplorationSteps(ExplorationBase):
     def __init__(self, *chains):
@@ -75,11 +78,16 @@ class ExploreUnknownMaps(ExplorationBase):
         self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
+        self.currentActualPos = None
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple):
         self.numpyMap = numpyMap
         self.canvas = numpyMap.canvas
+        self.currentActualPos = currentActualPos
         self.bfs.set_map(numpyMap, currentActualPos)
+
+    def redo_bfs(self):
+        self.bfs.set_map(self.numpyMap, self.currentActualPos)
 
     def stoppingCondition(self, node_info: NodeInformation):
         x = node_info.x
@@ -211,6 +219,7 @@ class DoBfs(ExplorationBase):
                 queue.to_next_distance()
             curr_node = queue.pop_item_at_current_distance(direction)
             if curr_node is None:  # queue empty, no more BFS
+                breakpoint()
                 assert False, "Probably all map has been explored"  # remove this if Exploration unknown cells no longer has bug
                 return empty_value
             node_info: NodeInformation = curr_node[0]
