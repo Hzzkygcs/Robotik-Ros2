@@ -50,6 +50,8 @@ class ExplorationSteps(ExplorationBase):
         while True:
             chain: ExplorationBase = self.chains[0]
             curr_destination = chain.get_destination()
+            if curr_destination is None:
+                curr_destination = self.move_on_to_next_destination()
             if curr_destination is not None:
                 return curr_destination
             assert False
