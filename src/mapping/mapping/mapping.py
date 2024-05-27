@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose2D, Point
+from rclpy.qos import QoSProfile, QoSHistoryPolicy
+from rclpy.qos_overriding_options import QoSOverridingOptions
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from geometry_msgs.msg import Pose
@@ -11,7 +13,7 @@ import numpy as np
 import time
 import cv2
 
-from std_msgs.msg import String, Empty
+from std_msgs.msg import String, Empty, Float32MultiArray
 from models.mapconstants import ALGORITHM_RESOLUTION
 from models.numpymap import NumpyMap, NumpyMapDisplayer
 from models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
@@ -24,12 +26,26 @@ class GridMapBuilder(Node):
             Pose2D,
             '/robot_pose',
             self.listener_pose,
-            10)
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
         self.subscription_scan = self.create_subscription(
             LaserScan,
             '/hokuyo',
             self.listener_scan,
-            10)
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
+        self.subscription_scan = self.create_subscription(
+            Float32MultiArray,  # [x1,y1,x2,y2].
+            '/goal_point/redo_bfs_if_blocked',
+            self.redo_bfs_if_blocked,
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
         self.subscription_goal_point_reached = self.create_subscription(
             Empty,
             '/goal_point/reached',
@@ -40,8 +56,13 @@ class GridMapBuilder(Node):
             '/goal_point/blocked',
             self.goal_point_is_blocked,
             10)
+        self.subscription_goal_point_blocked = self.create_subscription(
+            Empty,
+            '/goal_point/redo_bfs',
+            self.goal_point_redo_bfs,
+            1)
         self.publisher_goal_point = self.create_publisher(
-            Point,
+            Float32MultiArray,
             '/goal_point',
             10)
         self.publisher_map = self.create_publisher(
@@ -84,14 +105,33 @@ class GridMapBuilder(Node):
         self.is_processing = False
 
     def goal_point_is_reached(self, *msg):
-        print(f"NEXT DESTINATION. current: {self.bfs.overall_destinations()}")
-        result = self.bfs.move_on_to_next_destination()
-        chance = 100 if result is None else 0
-        self.broadcast_goal(self.map_for_bfs, chance)
+        print(f"Reached destination, redo BFS. current: {self.bfs.overall_destinations()}")
+        self.broadcast_goal(self.map_for_bfs, 100)
 
     def goal_point_is_blocked(self, *msg):
         print(f"BLOCKED. REPLANNING PATH. current: {self.bfs.overall_destinations()}")
         # self.broadcast_goal(self._resized_map, 100)
+
+    def goal_point_redo_bfs(self, *arg):
+        print(f"Requested to redo BFS")
+        self.broadcast_goal(self._resized_map, 100)
+
+    def redo_bfs_if_blocked(self, msg):
+        x1, y1, x2, y2 = msg.data
+        if self.bfs is not None:
+            route = self.bfs.overall_destinations()
+
+            # reset if waypoint stuck in wall(?)
+            if len(route) > 0:
+                curr_pos = self.map_for_bfs.actual_to_px((self.current_pose.x, self.current_pose.y))
+                next_destination = self.bfs.overall_destinations()[0][2]
+                line_to_next_dest = list(self.bresenham_line(curr_pos[0], curr_pos[1], next_destination[0], next_destination[1]))
+                for route in itertools.chain(map(lambda x: x[2], route), line_to_next_dest):
+                    px, py = route
+                    if self.map_for_bfs.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
+                        self.bfs.try_set_map(self.map_for_bfs, (self.current_pose.x, self.current_pose.y), 100)
+                        return
+
 
     @property
     def map_for_bfs(self):
@@ -133,27 +173,14 @@ class GridMapBuilder(Node):
         self.displayer_abstract.set_new_map(self.map_for_bfs).update_frame()
         self.displayer.update_frame()
 
-        # give BFS goals to map
-        if self.bfs is not None:
-            self.map.route = self.bfs.overall_destinations()
-
-            # reset if waypoint stuck in wall(?)
-            if len(self.map.route) > 0:
-                curr_pos = self.map_for_bfs.actual_to_px((self.current_pose.x, self.current_pose.y))
-                next_destination = self.bfs.overall_destinations()[0][2]
-                line_to_next_dest = list(self.bresenham_line(curr_pos[0], curr_pos[1], next_destination[0], next_destination[1]))
-                for route in itertools.chain(map(lambda x: x[2], self.map.route), line_to_next_dest):
-                    px, py = route
-                    if self.map_for_bfs.canvas[py][px] >= PATH_OBSTACLE_TRESHOLD:
-                        self.bfs.try_set_map(self.map_for_bfs, (self.current_pose.x, self.current_pose.y), 100)
-                        return
-
 
         self.broadcast_goal(self._resized_map)
         # Publish the occupancy grid
         self.publish_grid_map()
 
     def broadcast_goal(self, resized_map, chance=0):
+        if self.current_pose is None:
+            return
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
         x, y, _ = self.bfs.get_destination()
         self.displayer.set_destinations(self.bfs.overall_destinations())
@@ -162,11 +189,11 @@ class GridMapBuilder(Node):
         if self.map_for_bfs.canvas[final_dest[1]][final_dest[0]]:
             self.bfs.set_map(resized_map, (x, y))  # replan for new target
             print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
-        point = Point()
-        point.x = x
-        point.y = y
-        self.publisher_goal_point.publish(point)
-        print(f"Publishing {x},{y}   {self.map_for_bfs.x_to_px(x)},{self.map_for_bfs.y_to_px(y)}")
+
+        if self.bfs.reset_dirty_bit():
+            goal_points = self.bfs.overall_destinations()
+            self.publisher_goal_point.publish(PointToRosSerializers().serialize(goal_points))
+            print(f"Publishing")
 
     def bresenham_line(self, x0, y0, x1, y1):
         """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""
@@ -219,6 +246,21 @@ def main(args=None):
     rclpy.spin(grid_map_builder)
     grid_map_builder.destroy_node()
     rclpy.shutdown()
+
+
+
+class PointToRosSerializers:
+    def __init__(self):
+        pass
+
+    def serialize(self, data):
+        ret = Float32MultiArray()
+        ret.data = []
+        for i in data:
+            ret.data.append(i[0])
+            ret.data.append(i[1])
+        return ret
+
 
 
 if __name__ == '__main__':

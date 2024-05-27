@@ -5,7 +5,7 @@ from geometry_msgs.msg import Pose2D, Point, Twist
 import curses
 import numpy as np
 import time
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32MultiArray
 
 
 class Keyboard(Node):
@@ -17,7 +17,7 @@ class Keyboard(Node):
             self.robot_pose_callback,
             10)
         self.publisher_goal_point = self.create_publisher(
-            Point,
+            Float32MultiArray,
             '/goal_point',
             10)
 
@@ -152,9 +152,11 @@ class Keyboard(Node):
         self.keyboard_input_stdscr.addstr(5, 20, f"Current status: {status}")
 
     def publish_goal_point(self):
-        msg = Point()
-        msg.x = float(self.current_goal_point[0])
-        msg.y = float(self.current_goal_point[1])
+        msg = Float32MultiArray()
+        x = float(self.current_goal_point[0])
+        y = float(self.current_goal_point[1])
+        msg.data = [x, y]
+
         self.publisher_goal_point.publish(msg)
         if self.exit_signal:
             self.destroy_node()

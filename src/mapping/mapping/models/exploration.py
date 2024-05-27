@@ -33,6 +33,7 @@ class ExplorationSteps(ExplorationBase):
         self.chains: list = list(chains)
         self.numpyMap = None
         self.currentActualPos = None
+        self.dirty_bit = True
 
     # Used to update routing path but don't do it on every mapping update, only occasionally (for performance reason).
     # Will definitely update routing path if not yet intiialized
@@ -48,6 +49,7 @@ class ExplorationSteps(ExplorationBase):
         self.currentActualPos = currentActualPos
         chain = self.chains[0]
         chain.set_map(numpyMap, currentActualPos)
+        self.dirty_bit = True
 
     def get_destination(self):
         while True:
@@ -72,6 +74,10 @@ class ExplorationSteps(ExplorationBase):
     def overall_destinations(self):
         return self.chains[0].overall_destinations()
 
+    def reset_dirty_bit(self):
+        ret = self.dirty_bit
+        self.dirty_bit = False
+        return ret
 
 class ExploreUnknownMaps(ExplorationBase):
     def __init__(self):

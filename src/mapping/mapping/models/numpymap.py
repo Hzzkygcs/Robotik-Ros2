@@ -26,7 +26,6 @@ class NumpyMap:
 
         # V
         self.robot_pos = None
-        self.route = None
 
         self.canvas = np.full((self.px_height, self.px_width, 1), PATH_UNKNOWN_VALUE, dtype=np.uint8)
 
@@ -204,8 +203,8 @@ class NumpyMapDisplayer:
 
         if self.map.robot_pos is not None:
             copied_canvas = display_robot_on_canvas(copied_canvas, self.map)
-        if self.map.route is not None:
-            copied_canvas = display_route_on_canvas(copied_canvas, self.map)
+        # if self.map.route is not None:
+        #     copied_canvas = display_route_on_canvas(copied_canvas, self.map)
 
         self._canvas_axes.set_data(copied_canvas)
         plt.pause(0.001)
@@ -269,17 +268,17 @@ def display_robot_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=Tru
 
     return canvas
 
-def display_route_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=True):
-    canvas = np.copy(np_canvas_array) if copy else np_canvas_array
-    for route in map.route:
-        px = route[2][0]
-        py = route[2][1]
-
-        # Draw waypoints
-        for x, y, manhattan in generate_circle_pixels((px, py), WAYPOINT_RADIUS):
-            canvas[y][x] = WAYPOINT_VALUE
-
-    return canvas
+# def display_route_on_canvas(np_canvas_array: np.ndarray, map: NumpyMap, copy=True):
+#     canvas = np.copy(np_canvas_array) if copy else np_canvas_array
+#     for route in map.route:
+#         px = route[2][0]
+#         py = route[2][1]
+#
+#         # Draw waypoints
+#         for x, y, manhattan in generate_circle_pixels((px, py), WAYPOINT_RADIUS):
+#             canvas[y][x] = WAYPOINT_VALUE
+#
+#     return canvas
 
 
 def apply_dilation(np_canvas_array, copy=True):

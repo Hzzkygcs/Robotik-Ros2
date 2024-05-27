@@ -2,10 +2,11 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSHistoryPolicy
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Pose2D, Point, Twist
 # from navigation.srv import SetGoal
-from std_msgs.msg import String, Empty
+from std_msgs.msg import String, Empty, Float32MultiArray
 
 import numpy as np
 
@@ -31,12 +32,22 @@ class Navigate(Node):
             Pose2D,
             '/robot_pose',
             self.robot_pose_callback,
-            10)
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
         self.subscriber_goal_point = self.create_subscription(
-            Point,
+            Float32MultiArray,
             '/goal_point',
             self.goal_point_callback,
-            10)
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
+        self.publisher_goal_point_redo_bfs = self.create_publisher(
+            Empty,
+            '/goal_point/redo_bfs',
+            2)
         self.publisher_cmd_vel = self.create_publisher(
             Twist,
             '/robot_cmd_vel',
@@ -70,10 +81,13 @@ class Navigate(Node):
         self.robot_pose = Pose2D()
         self.robot_pose_received = False
 
-        self.goal_point = Point()
+        self.goal_points = Float32MultiArray()
+        self.goal_points = []
+        self.goal_point_index = 0
         self.goal_point_received = False
         self.arrived = True
         self.movement_override = NopMovementOverride()
+        self.redo_bfs()
 
     def listener_scan(self, msg):
         self.laser_scan = msg
@@ -82,20 +96,45 @@ class Navigate(Node):
     def user_input(self, msg):
         self.movement_override = RotateInPlace(3, 2)
 
+    def redo_bfs(self):
+        self.publisher_goal_point_redo_bfs.publish(Empty())
 
     def robot_pose_callback(self, msg):
         self.robot_pose = msg
         self.robot_pose_received = True
 
         if not self.goal_point_received:
-            self.goal_point.x = self.robot_pose.x
-            self.goal_point.y = self.robot_pose.y
+            self.goal_points = [self.robot_pose.x, self.robot_pose.y]
 
     def goal_point_callback(self, msg):
-        self.goal_point = msg
+        self.goal_points = msg.data
+        self.goal_point_index = 0
         self.goal_point_received = True
         self.arrived = False
         print("new goal point received")
+
+    def __update_current_goal_point_index(self):
+        pass
+
+    def get_goal_point(self, index):
+        return self.goal_points[index*2], self.goal_points[index*2+1]
+
+    def next_goal_point(self):
+        if (self.goal_point_index+1)*2 >= len(self.goal_points):
+            self.handle_arrived()
+            print("FINISHED")
+            return
+        self.goal_point_index += 1
+        print(f"Moving to next goal_point: {self.goal_point_index} {self.get_goal_point(self.goal_point_index)}")
+
+    @property
+    def goal_point(self):
+        ret = Point()
+        if len(self.goal_points):
+            ret.x, ret.y = self.get_goal_point(self.goal_point_index)
+        else:
+            ret.x, ret.y = self.robot_pose.x, self.robot_pose.y
+        return ret
 
     def update_straight_raycast(self):
         short_distance = float('inf')
@@ -163,7 +202,7 @@ class Navigate(Node):
             return
         if  self.goal_distance() < DISTANCE_THRESHOLD_TO_GOAL and math.degrees(abs(self.goal_angle())) < 8:
             self.publisher_cmd_vel.publish(Twist())
-            self.handle_arrived()
+            self.next_goal_point()
             return
 
         goal_angle_deg = math.degrees(self.goal_angle())
@@ -172,7 +211,7 @@ class Navigate(Node):
                 deg = math.degrees(self.goal_angle())
                 if abs(deg) <= MAX_ANGLE_DEGREE_TOWARD_GOAL:
                     return None
-                return math.copysign(deg/14, deg)
+                return math.copysign(deg/24, deg)
             print(f"Rotating... {goal_angle_deg}")
             self.movement_override = RotateInPlace(rotation)
 
@@ -186,7 +225,7 @@ class Navigate(Node):
 
         # Direction where we should face, same as theta but quadrant 3-4 is negative (-3.14->-0), 4 max is -0
         goal_angle = np.arctan2(dy, dx)
-        print(f"Robot's heading to: {self.goal_point.x, self.goal_point.y, goal_angle}")
+        # print(f"Robot's heading to: {self.goal_point.x, self.goal_point.y, goal_angle}")
 
         # quadrant 1 is 0-1.5, 2 is 1.6-3.14, 3 is 3.15-4.6~, 4 is 4.6-6.28
         # print(f"Robot's facing: {self.robot_pose.theta}")
@@ -221,7 +260,7 @@ class Navigate(Node):
         if distance > DISTANCE_THRESHOLD_TO_GOAL:
             cmd_vel.linear.y = 0.6  * SPEED_MULTIPLIER
 
-            print(goal_angle_adjusted, self.robot_pose.theta)
+            # print(goal_angle_adjusted, self.robot_pose.theta)
             # if abs(goal_angle_adjusted - self.robot_pose.theta) < 0.2:  # Only move when facing the correct direction
             #     print("Facing correctly")
             #     cmd_vel.linear.y = 0.6
@@ -229,7 +268,7 @@ class Navigate(Node):
         else:
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0
-            self.handle_arrived()
+            self.next_goal_point()
 
         self.publisher_cmd_vel.publish(cmd_vel)
 
@@ -247,6 +286,40 @@ class Navigate(Node):
         print("REACHED GOAL POINT")
         self.publisher_goal_point_reached.publish(Empty())
         self.arrived = True
+
+
+def lineseg_dists(p, a, b):
+    """Cartesian distance from point to line segment
+    Taken from https://stackoverflow.com/a/58781995/7069108
+
+    Edited to support arguments as series, from:
+    https://stackoverflow.com/a/54442561/11208892
+
+    Args:
+        - p: np.array of single point, shape (2,) or 2D array, shape (x, 2)
+        - a: np.array of shape (x, 2)
+        - b: np.array of shape (x, 2)
+    """
+    # normalized tangent vectors
+    d_ba = b - a
+    d = np.divide(d_ba, (np.hypot(d_ba[:, 0], d_ba[:, 1])
+                         .reshape(-1, 1)))
+
+    # signed parallel distance components
+    # rowwise dot products of 2D vectors
+    s = np.multiply(a - p, d).sum(axis=1)
+    t = np.multiply(p - b, d).sum(axis=1)
+
+    # clamped parallel distance
+    h = np.maximum.reduce([s, t, np.zeros(len(s))])
+
+    # perpendicular distance component
+    # rowwise cross products of 2D vectors
+    d_pa = p - a
+    c = d_pa[:, 0] * d[:, 1] - d_pa[:, 1] * d[:, 0]
+
+    return np.hypot(h, c)
+
 
 
 def main(args=None):
