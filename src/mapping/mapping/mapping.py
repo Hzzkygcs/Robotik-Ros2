@@ -50,12 +50,12 @@ class GridMapBuilder(Node):
             Empty,
             '/goal_point/reached',
             self.goal_point_is_reached,
-            10)
+            1)
         self.subscription_goal_point_blocked = self.create_subscription(
             Empty,
             '/goal_point/blocked',
             self.goal_point_is_blocked,
-            10)
+            1)
         self.subscription_goal_point_blocked = self.create_subscription(
             Empty,
             '/goal_point/redo_bfs',
@@ -64,7 +64,10 @@ class GridMapBuilder(Node):
         self.publisher_goal_point = self.create_publisher(
             Float32MultiArray,
             '/goal_point',
-            10)
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
         self.publisher_map = self.create_publisher(
             OccupancyGrid,
             '/occupancy_map',
@@ -193,7 +196,7 @@ class GridMapBuilder(Node):
         if self.bfs.reset_dirty_bit():
             goal_points = self.bfs.overall_destinations()
             self.publisher_goal_point.publish(PointToRosSerializers().serialize(goal_points))
-            print(f"Publishing")
+            print(f"Publishing. Current pose: {self._resized_map.actual_to_px((self.current_pose.x, self.current_pose.y))}")
 
     def bresenham_line(self, x0, y0, x1, y1):
         """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""

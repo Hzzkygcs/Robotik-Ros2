@@ -42,10 +42,11 @@ DEGREE = 10
 MOVEMENT_SPEED = 0.5
 
 class BackwardMovementOverride(MovementOverride):
-    def __init__(self, obstacle_on_left: bool, expire_duration=3, next_override: MovementOverride=None):
+    def __init__(self, obstacle_on_left: bool, expire_duration=3, speed_multiplier=1, next_override: MovementOverride=None):
         super().__init__(expire_duration)
         self.next_override = next_override
         self.obstacle_at_left = obstacle_on_left
+        self.speed_multiplier = speed_multiplier
 
     @property
     def twist(self):
@@ -53,7 +54,7 @@ class BackwardMovementOverride(MovementOverride):
             return self._get_twist_of_next_override()
         ret = Twist()
         theta = math.radians(-DEGREE if self.obstacle_at_left else DEGREE) * 3
-        ret.linear.y = -MOVEMENT_SPEED
+        ret.linear.y = -MOVEMENT_SPEED * self.speed_multiplier
         ret.angular.z = 2.0 * theta
         return ret
 
