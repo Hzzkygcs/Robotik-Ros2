@@ -21,6 +21,7 @@ AVOID_DISTANCE = 0.05
 MAX_ANGLE_DEGREE_TOWARD_GOAL = 70
 DISTANCE_THRESHOLD_TO_GOAL = 0.15
 
+MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH = 0.8
 OBSTACLE_AVOID_RAYCAST_LENGTH = 0.8
 GO_BACKWARD_OBSTACLE_DIST = 0.27
 SPEED_MULTIPLIER = 1 / 0.6
@@ -111,10 +112,30 @@ class Navigate(Node):
         self.goal_point_index = 0
         self.goal_point_received = True
         self.arrived = False
-        print("new goal point received")
+        self.__update_current_goal_point_index()
+        print(f"new goal point received. Current goal point index: {self.goal_point_index}")
 
     def __update_current_goal_point_index(self):
-        pass
+        number_of_path_planning = self.goal_points_length
+        if number_of_path_planning < 2:
+            return
+        curr_pos = np.array([self.robot_pose.x, self.robot_pose.y])
+        all_target = np.empty((number_of_path_planning, 2))
+        for i in range(number_of_path_planning):
+            x, y = self.get_goal_point(i)
+            all_target[i, 0] = x
+            all_target[i, 1] = y
+        line_segment_starts = all_target[0:number_of_path_planning-1, :]
+        line_segment_ends = all_target[1:number_of_path_planning, :]
+        distances = line_segment_distances(curr_pos, line_segment_starts, line_segment_ends)
+        closest_index = np.argmin(distances)
+        if distances[closest_index] > MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH:
+            return
+        # if ith (starts from 0) segment is the greatest, then we will heading to the line_segment_ends of the ith segment,
+        # which is the (i+1)-th index of all_target (because line_segment_ends[i] = all_target[i+1]
+        self.goal_point_index = closest_index + 1
+
+
 
     def get_goal_point(self, index):
         return self.goal_points[index*2], self.goal_points[index*2+1]
@@ -126,6 +147,12 @@ class Navigate(Node):
             return
         self.goal_point_index += 1
         print(f"Moving to next goal_point: {self.goal_point_index} {self.get_goal_point(self.goal_point_index)}")
+
+    @property
+    def goal_points_length(self):
+        ret = len(self.goal_points)
+        assert ret % 2 == 0
+        return ret // 2
 
     @property
     def goal_point(self):
@@ -253,6 +280,7 @@ class Navigate(Node):
                 # self.movement_override = NopMovementOverride()
             if closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST:
                 self.robot_go_bakcward(obstacle_at_left)
+                self.redo_bfs()
 
 
         cmd_vel = Twist()
@@ -288,7 +316,7 @@ class Navigate(Node):
         self.arrived = True
 
 
-def lineseg_dists(p, a, b):
+def line_segment_distances(p, a, b):
     """Cartesian distance from point to line segment
     Taken from https://stackoverflow.com/a/58781995/7069108
 

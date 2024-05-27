@@ -182,12 +182,12 @@ class GridMapBuilder(Node):
         if self.current_pose is None:
             return
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
-        x, y, _ = self.bfs.get_destination()
         self.displayer.set_destinations(self.bfs.overall_destinations())
 
         _, _, final_dest = self.bfs.overall_destinations()[-1]
-        if self.map_for_bfs.canvas[final_dest[1]][final_dest[0]]:
-            self.bfs.set_map(resized_map, (x, y))  # replan for new target
+        if self.map_for_bfs.canvas[final_dest[1]][final_dest[0]] and self.current_pose is not None:
+            # re-plan for new target
+            self.bfs.set_map(resized_map, (self.current_pose.x, self.current_pose.y))
             print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
 
         if self.bfs.reset_dirty_bit():
