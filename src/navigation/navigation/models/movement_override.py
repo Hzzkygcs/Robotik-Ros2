@@ -39,7 +39,7 @@ class NopMovementOverride(MovementOverride):
         return
 
 DEGREE = 10
-MOVEMENT_SPEED = 0.5
+MOVEMENT_SPEED = 2.0
 
 class BackwardMovementOverride(MovementOverride):
     def __init__(self, obstacle_on_left: bool, expire_duration=3, speed_multiplier=1, next_override: MovementOverride=None):

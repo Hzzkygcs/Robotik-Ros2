@@ -13,18 +13,21 @@ import numpy as np
 from models.movement_override import BackwardMovementOverride, ForwardMovementOverride, MovementOverride, \
     NopMovementOverride, RotateInPlace
 
-from src.navigation.navigation.models.straightvirtualraycast import StraightVirtualRayCast
+from src.navigation.navigation.models.straightvirtualraycast import StraightVirtualRayCast, \
+    StraightVirtualRayCastVisualizer
 from src.navigation.navigation.models.visionblockedcheck import VisionBlockedChecker
 
 TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.05
-MAX_ANGLE_DEGREE_TOWARD_GOAL = 115
+MAX_ANGLE_DEGREE_TOWARD_GOAL = 50
+# MAX_ANGLE_DEGREE_TOWARD_GOAL = 115
 DISTANCE_THRESHOLD_TO_GOAL = 0.2
 
 MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH = 0.8
-OBSTACLE_AVOID_RAYCAST_LENGTH = 0.8
+OBSTACLE_AVOID_RAYCAST_LENGTH = 1.0
 GO_BACKWARD_OBSTACLE_DIST = 0.27
+GO_BACKWARD_ROBOT_RADIUS = 0.25
 # GO_BACKWARD_OBSTACLE_DIST = 0.22
 
 SPEED_MULTIPLIER = 1
@@ -81,6 +84,7 @@ class Navigate(Node):
 
         self.vision_blocked_checker = VisionBlockedChecker(math.radians(10))
         self.straight_raycast = StraightVirtualRayCast(OBSTACLE_AVOID_RAYCAST_LENGTH)
+        self.straight_raycast_visualizer = StraightVirtualRayCastVisualizer(self.straight_raycast)
         self.backward_penalty = 0  # if it reaches certain number, it will not go backward no mater what
         self.laser_scan = LaserScan()
         self.laser_scan_received = False
@@ -167,6 +171,12 @@ class Navigate(Node):
         return ret // 2
 
     @property
+    def position(self):
+        if not self.robot_pose_received:
+            return None
+        return self.robot_pose.x, self.robot_pose.y
+
+    @property
     def goal_point(self):
         ret = Point()
         if len(self.goal_points):
@@ -184,6 +194,9 @@ class Navigate(Node):
 
         distances = np.array(self.laser_scan.ranges)
         angles = np.linspace(self.laser_scan.angle_min, self.laser_scan.angle_max, len(self.laser_scan.ranges))
+
+        self.straight_raycast.raycast_length = max(OBSTACLE_AVOID_RAYCAST_LENGTH,
+                                                   0.5 + distance(self.goal_point, self.position))
         self.straight_raycast.obstacle_hits = distances, angles
         self.vision_blocked_checker.set_obstacle_distances(distances)
         self.vision_blocked_checker.set_obstacle_angles(angles)
@@ -215,7 +228,7 @@ class Navigate(Node):
         expire_duration = 0
         goal_is_in_left_func = lambda: self.goal_angle() > 0
         self.movement_override = MovementOverride.chain(
-            BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1, speed_multiplier=1.5),
+            BackwardMovementOverride(obstacle_left, expire_duration:= expire_duration + 1, speed_multiplier=0.6),
             self._get_rotate_in_place(-10),
             # ForwardMovementOverride(lambda: not obstacle_left, 0.2, expire_duration:= expire_duration + 1.5),
             # ForwardMovementOverride(goal_is_in_left_func, 1, expire_duration:= expire_duration + 0.5),
@@ -252,13 +265,16 @@ class Navigate(Node):
         if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:
             self.movement_override = self._get_rotate_in_place()
 
-        self.update_straight_raycast()
-        # if self.obstacle_avoidance():
-        #     return
-
         dx = self.goal_point.x - self.robot_pose.x
         dy = self.goal_point.y - self.robot_pose.y
         distance = self.goal_distance()
+
+        self.update_straight_raycast()
+        if self.straight_raycast_visualizer is not None:
+            self.straight_raycast_visualizer.update_frame((math.atan2(dy, dx)-self.robot_pose.theta + math.radians(90), distance))
+        # if self.obstacle_avoidance():
+        #     return
+
 
         # Direction where we should face, same as theta but quadrant 3-4 is negative (-3.14->-0), 4 max is -0
         goal_angle = np.arctan2(dy, dx)
@@ -280,23 +296,25 @@ class Navigate(Node):
         self.backward_penalty = max(0, self.backward_penalty-1)
         if closest_overall is not None:
             obstacle_at_left = closest_overall[0] < 0
+            constant = 5
             magnitude = 9 - 4 * closest_overall[1]/OBSTACLE_AVOID_RAYCAST_LENGTH
             magnitude *= max(1,SPEED_MULTIPLIER)
-            assert magnitude >= 0
+            magnitude = max(1, magnitude)
             if obstacle_at_left and theta > 0:  # if obstacle on left and we're heading left
-                theta = math.radians(-5 * magnitude)  # go to slightly right
+                theta = math.radians(-5 * magnitude - constant)  # go to slightly right
                 # self.movement_override = NopMovementOverride()
             elif not obstacle_at_left and theta < 0:  # if obstacle on right and we're heading right
-                theta = math.radians(5 * magnitude)  # go to slightly left
+                theta = math.radians(5 * magnitude + constant)  # go to slightly left
                 # self.movement_override = NopMovementOverride()
 
             max_backward_duration = 3/TICK_RATE
             stop_backward_duration = 3/TICK_RATE
-            if closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and self.backward_penalty < max_backward_duration:
+            condition = closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and abs(closest_overall[0]) <= GO_BACKWARD_ROBOT_RADIUS
+            if condition and self.backward_penalty < max_backward_duration:
                 self.backward_penalty += 2  # in total +1. +2 because we do -1 earlier
                 self.robot_go_bakcward(obstacle_at_left)
                 self.redo_bfs()
-            elif closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and self.backward_penalty > max_backward_duration:
+            elif condition and self.backward_penalty > max_backward_duration:
                 self.backward_penalty += min(max_backward_duration+stop_backward_duration, stop_backward_duration)
 
 
@@ -343,6 +361,19 @@ class Navigate(Node):
         self.publisher_goal_point_reached.publish(Empty())
         self.arrived = True
 
+
+def distance(point1: tuple, point2: tuple):
+    if point1 is None:
+        return -1
+    if point2 is None:
+        return -1
+    if isinstance(point1, Point):
+        point1 = (point1.x, point1.y)
+    if isinstance(point2, Point):
+        point2 = (point2.x, point2.y)
+    dx = point1[0] - point2[0]
+    dy = point1[1] - point2[1]
+    return math.sqrt(dx ** 2 + dy ** 2)
 
 def line_segment_distances(p, a, b):
     """Cartesian distance from point to line segment

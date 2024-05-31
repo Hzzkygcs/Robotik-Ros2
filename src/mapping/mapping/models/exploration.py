@@ -1,6 +1,7 @@
 from __future__ import annotations
 import abc
 import collections
+import math
 import random
 
 from .direction import *
@@ -27,44 +28,56 @@ class ExplorationBase(abc.ABC):
     def redo_bfs(self):
         raise NotImplementedError
 
+    def tick_to_check_if_need_replan(self, robot_pose):
+        raise NotImplementedError
 
-class ExplorationSteps(ExplorationBase):
-    def __init__(self, *chains):
-        self.chains: list = list(chains)
+
+class ExplorationEvent(ExplorationBase):
+    def __init__(self, bfsStrategy: ExplorationBase, onComplete):
+        self.chains: list = [bfsStrategy]
+        self.onComplete = onComplete
         self.numpyMap = None
         self.currentActualPos = None
         self.dirty_bit = True
+        self.finished = False
 
     # Used to update routing path but don't do it on every mapping update, only occasionally (for performance reason).
     # Will definitely update routing path if not yet intiialized
     def try_set_map(self, numpyMap: NumpyMap, currentActualPos: tuple, chance: int):
         assert 0 <= chance <= 100
-        if not random.randint(0, 100) <= chance and self.numpyMap is not None:
-            return
-        self.set_map(numpyMap, currentActualPos)
+        if random.randint(0, 100) > chance and self.numpyMap is not None and len(self.overall_destinations()) > 0:
+            return True
+        ret = self.set_map(numpyMap, currentActualPos)
         print(self.overall_destinations())
+        return ret
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple):
+        if self.finished:
+            return True
         self.numpyMap = numpyMap
         self.currentActualPos = currentActualPos
         chain = self.chains[0]
-        chain.set_map(numpyMap, currentActualPos)
+        success = chain.set_map(numpyMap, currentActualPos)
+        if not success:
+            self.finished = True
+            self.onComplete()
+            return False
         self.dirty_bit = True
+        return True
 
     def get_destination(self):
-        while True:
-            chain: ExplorationBase = self.chains[0]
-            curr_destination = chain.get_destination()
-            if curr_destination is None:
-                curr_destination = self.move_on_to_next_destination()
-            if curr_destination is not None:
-                return curr_destination
-            assert False
-            self.chains.pop(0)  # would be better to use queue tho
-            if len(self.chains) == 0:
-                breakpoint()
-            chain: ExplorationBase = self.chains[0]
-            chain.set_map(self.numpyMap, self.currentActualPos)
+        if self.finished:
+            return True
+        chain: ExplorationBase = self.chains[0]
+        curr_destination = chain.get_destination()
+        if curr_destination is None:
+            curr_destination = self.move_on_to_next_destination()
+        if curr_destination is not None:
+            return curr_destination
+        self.finished = True
+        self.onComplete()
+        # self.chains.pop(0)  # would be better to use queue tho
+
 
     def move_on_to_next_destination(self):
         first_item: ExplorationBase = self.chains[0]
@@ -73,6 +86,9 @@ class ExplorationSteps(ExplorationBase):
 
     def overall_destinations(self):
         return self.chains[0].overall_destinations()
+
+    def tick_to_check_if_need_replan(self, robot_pose):
+        return self.chains[0].tick_to_check_if_need_replan(robot_pose)
 
     def reset_dirty_bit(self):
         ret = self.dirty_bit
@@ -90,7 +106,7 @@ class ExploreUnknownMaps(ExplorationBase):
         self.numpyMap = numpyMap
         self.canvas = numpyMap.canvas
         self.currentActualPos = currentActualPos
-        self.bfs.set_map(numpyMap, currentActualPos)
+        return self.bfs.set_map(numpyMap, currentActualPos)
 
     def redo_bfs(self):
         self.bfs.set_map(self.numpyMap, self.currentActualPos)
@@ -109,19 +125,30 @@ class ExploreUnknownMaps(ExplorationBase):
     def overall_destinations(self):
         return self.bfs.overall_destinations()
 
+    def tick_to_check_if_need_replan(self, robot_pose):
+        temp = self.bfs.overall_destinations()
+        if temp is None or len(temp) == 0:
+            return
+        _, _, final_dest = temp[-1]
+        if self.numpyMap.canvas[final_dest[1]][final_dest[0]] and robot_pose is not None:
+            self.bfs.set_map(self.numpyMap, (robot_pose.x, robot_pose.y))
+
 
 class BfsToDestination(ExplorationBase):
-    def __init__(self, destination_actual_coordinate):
+    def __init__(self, destination_actual_coordinate: tuple):
         self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
         self.numpyMap = None
         self.canvas = None
+        self.arrived = False
         self.destination_actual_coordinate = destination_actual_coordinate
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple):
+        if self.arrived:
+            return False
         self.numpyMap = numpyMap
         self.destination_px_coord = numpyMap.actual_to_px(self.destination_actual_coordinate)
         self.canvas = numpyMap.canvas
-        self.bfs.set_map(numpyMap, currentActualPos)
+        return self.bfs.set_map(numpyMap, currentActualPos)
 
     def stoppingCondition(self, node_info: NodeInformation):
         x = node_info.x
@@ -136,6 +163,16 @@ class BfsToDestination(ExplorationBase):
 
     def overall_destinations(self):
         return self.bfs.overall_destinations()
+
+    def tick_to_check_if_need_replan(self, robot_pose):
+        dx = self.destination_actual_coordinate[0] - robot_pose.x
+        dy = self.destination_actual_coordinate[1] - robot_pose.y
+        distance = math.sqrt(dx**2 + dy**2)
+        if distance < 0.3:
+            self.arrived = True
+
+    def reset_dirty_bit(self):
+        pass
 
 
 class DoBfs(ExplorationBase):
@@ -157,6 +194,8 @@ class DoBfs(ExplorationBase):
         self.shortest_maps = [[NodeInformation(x, y) for x in range(self.numpyMap.px_width)]
                               for y in range(self.numpyMap.px_height)]
         final_node = self.bfs_find_route(self.stopping_condition)
+        if final_node is None:
+            return False
         self.final_node = final_node  # debugging purpose only
         origin_coord = None
         for pixel_coord in self.backtrack_routes(final_node):
@@ -164,6 +203,7 @@ class DoBfs(ExplorationBase):
             self.routes.appendleft((act_x, act_y, pixel_coord))
             origin_coord = pixel_coord
         self.origin_coord = origin_coord  # debugging purpose only
+        return True
         # final_node = self.bfs_find_route(self.stopping_condition)
         # self.final_node = final_node  # debugging purpose only
         # origin_coord = None
@@ -198,6 +238,7 @@ class DoBfs(ExplorationBase):
         while True:
             is_origin_point = (curr_node.shortest_distance == 0)
             if is_origin_point:
+                yield curr_node.x, curr_node.y
                 return
             if curr_node.direction_to_here != last_direction:
                 yield curr_node.x, curr_node.y # , curr_node.direction_to_source
@@ -225,8 +266,6 @@ class DoBfs(ExplorationBase):
                 queue.to_next_distance()
             curr_node = queue.pop_item_at_current_distance(direction)
             if curr_node is None:  # queue empty, no more BFS
-                breakpoint()
-                assert False, "Probably all map has been explored"  # remove this if Exploration unknown cells no longer has bug
                 return empty_value
             node_info: NodeInformation = curr_node[0]
             direction: int = curr_node[1]
@@ -253,6 +292,8 @@ class DoBfs(ExplorationBase):
     def overall_destinations(self):
         return self.routes
 
+    def tick_to_check_if_need_replan(self, _):
+        pass
 
 class BfsQueue:
     def __init__(self):

@@ -1,9 +1,10 @@
 import itertools
+import math
 
 import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose2D, Point
+from geometry_msgs.msg import Pose2D, Point, Twist
 from rclpy.qos import QoSProfile, QoSHistoryPolicy
 from rclpy.qos_overriding_options import QoSOverridingOptions
 from sensor_msgs.msg import LaserScan
@@ -16,7 +17,7 @@ import cv2
 from std_msgs.msg import String, Empty, Float32MultiArray
 from models.mapconstants import ALGORITHM_RESOLUTION
 from models.numpymap import NumpyMap, NumpyMapDisplayer
-from models.exploration import ExplorationSteps, BfsToDestination, ExploreUnknownMaps
+from models.exploration import ExplorationEvent, BfsToDestination, ExploreUnknownMaps
 from models.mapconstants import *
 
 class GridMapBuilder(Node):
@@ -68,6 +69,14 @@ class GridMapBuilder(Node):
                 depth=1,
                 history=QoSHistoryPolicy.KEEP_LAST
             ))
+        self.subscription_cmd_vel = self.create_subscription(
+            Twist,
+            '/robot_cmd_vel',
+            self.robot_cmd_vel_update,
+            QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy.KEEP_LAST
+            ))
         self.publisher_map = self.create_publisher(
             OccupancyGrid,
             '/occupancy_map',
@@ -89,6 +98,8 @@ class GridMapBuilder(Node):
         self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
         self.displayer.update_frame()
         self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
+        self.pause_mapping = False
+        self.start_time = None
 
         # Grid map parameters
         self.map_size_x = 10  # in meters
@@ -101,11 +112,25 @@ class GridMapBuilder(Node):
         self.current_pose = None
 
         ### EXPLORATION
-        self.bfs = ExplorationSteps(
-            ExploreUnknownMaps(),
-            BfsToDestination((6.275, -2.225)))
+        self.bfs = ExplorationEvent(
+            ExploreUnknownMaps(), lambda: self.set_bfs(ExplorationEvent(
+                BfsToDestination((6.64, 2.8)), lambda: self.set_bfs(
+                    ExplorationEvent(BfsToDestination((6.275, -2.225)), lambda: print("FINISHED!"))
+            ))))
 
         self.is_processing = False
+
+    def set_bfs(self, new_bfs):
+        self.bfs = new_bfs
+
+    def robot_cmd_vel_update(self, msg: Twist) -> None:
+        rotation_speed = msg.angular.z
+        if self.start_time is None:
+            return
+        if time.time() < self.start_time + 4:  # do not pause during the first 4 seconds
+            return
+        self.pause_mapping = abs(rotation_speed) > math.radians(35)  # max at 20 deg/sec
+
 
     def goal_point_is_reached(self, *msg):
         print(f"Reached destination, redo BFS. current: {self.bfs.overall_destinations()}")
@@ -142,6 +167,7 @@ class GridMapBuilder(Node):
 
     def listener_pose(self, msg):
         self.current_pose = msg
+        self.start_time = self.start_time if self.start_time is not None else time.time()
         grid_x = int((self.current_pose.x / self.resolution) + (self.grid_size_x / 2))
         grid_y = int((self.current_pose.y / self.resolution) + (self.grid_size_y / 2))
 
@@ -163,8 +189,9 @@ class GridMapBuilder(Node):
         y_coords = distances * np.sin(angles + self.current_pose.theta) + self.current_pose.y
         curr_pos = self.current_pose.x, self.current_pose.y
 
-        for end_x, end_y, distance in zip(x_coords, y_coords, distances):
-            self.map.add_raycast(curr_pos, (end_x, end_y), distance < msg.range_max)
+        if not self.pause_mapping:
+            for end_x, end_y, distance in zip(x_coords, y_coords, distances):
+                self.map.add_raycast(curr_pos, (end_x, end_y), distance < msg.range_max)
 
         # update robot position on map - V
         self.map.robot_pos = self.current_pose
@@ -187,11 +214,7 @@ class GridMapBuilder(Node):
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
         self.displayer.set_destinations(self.bfs.overall_destinations())
 
-        _, _, final_dest = self.bfs.overall_destinations()[-1]
-        if self.map_for_bfs.canvas[final_dest[1]][final_dest[0]] and self.current_pose is not None:
-            # re-plan for new target
-            self.bfs.set_map(resized_map, (self.current_pose.x, self.current_pose.y))
-            print(f"Target block is no longer unknown. Replanning to be {self.bfs.overall_destinations()}")
+        self.bfs.tick_to_check_if_need_replan(self.current_pose)
 
         if self.bfs.reset_dirty_bit():
             goal_points = self.bfs.overall_destinations()
