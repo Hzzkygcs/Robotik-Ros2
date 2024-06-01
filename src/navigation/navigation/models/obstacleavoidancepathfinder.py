@@ -57,9 +57,10 @@ class ObstacleAvoidancePathFinder:
         coordinates = np.stack((self._x, self._y), axis=1)
         groups = self.group_similar_values(self._distances, 0.4)
         self.groups = groups
+        avoid_obstacle_to_right = self.avoid_obstacle_to_right
 
-        distance, intersection_points = pnt2line(coordinates, self.current_position, self.goal_point)
-        candidate_groups = np.unique(groups[distance < self.robot_radius])
+        intersection_distance, intersection_points = pnt2line(coordinates, self.current_position, self.goal_point)
+        candidate_groups = np.unique(groups[intersection_distance < self.robot_radius])
         minimum_length = float('inf')
         selected_group = None
         for group in candidate_groups:
@@ -67,17 +68,28 @@ class ObstacleAvoidancePathFinder:
             right_index = index[0][0]  # (right = negative angles = lower/first index)
             left_index = index[0][-1]  # in perspective of robot's POV (left = positive angles = higher/last index)
 
-            if self.avoid_obstacle_to_right is None:
-                self.avoid_obstacle_to_right = distance[right_index] < distance[left_index]
-            shortest_index = right_index if self.avoid_obstacle_to_right else left_index
-
+            if avoid_obstacle_to_right is None:
+                avoid_obstacle_to_right = intersection_distance[right_index] < intersection_distance[left_index]
+            shortest_index = right_index if avoid_obstacle_to_right else left_index
             middle_candidate = self._calculate_middle_point(coordinates[shortest_index], intersection_points[shortest_index],
-                                                            self.avoid_obstacle_to_right)
+                                                            avoid_obstacle_to_right)
             distance_toward_middle_point = np.linalg.norm(middle_candidate)
             if distance_toward_middle_point < minimum_length:
                 self.middle = middle_candidate
                 minimum_length = distance_toward_middle_point
                 selected_group = group
+
+        # self.avoid_obstacle_to_right is None check so that this code will be run only once in a while
+        if self.middle is not None and self.avoid_obstacle_to_right is None:
+            intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
+            tolerance = 0.02  # arbitrary number for floating point errors
+            middle_point_collides_with_other_obstacle = (intersection_distance < self.robot_radius - tolerance)
+            if middle_point_collides_with_other_obstacle.any():
+                print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
+                      f"with other obstacle. Choosing the other side...")
+                avoid_obstacle_to_right = not avoid_obstacle_to_right  # choose the other way around
+        self.avoid_obstacle_to_right = avoid_obstacle_to_right
+
         if selected_group is not None:
             index = np.where(groups == selected_group)
             right_index = index[0][0]
@@ -130,7 +142,7 @@ class ObstacleAvoidancePathFinder:
     @property
     def virtual_goal_point(self):
         self._update_xy()
-        if self.middle is not None:
+        if self.middle is not None and np.linalg.norm(self.middle) > 0.15:
             return self.middle
         if self.goal_point is None:
             return None

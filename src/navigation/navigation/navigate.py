@@ -22,7 +22,7 @@ from src.navigation.navigation.models.visionblockedcheck import VisionBlockedChe
 TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.05
-MAX_ANGLE_DEGREE_TOWARD_GOAL = 50
+MAX_ANGLE_DEGREE_TOWARD_GOAL = 90
 # MAX_ANGLE_DEGREE_TOWARD_GOAL = 115
 DISTANCE_THRESHOLD_TO_GOAL = 0.2
 
