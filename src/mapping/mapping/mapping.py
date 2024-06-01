@@ -111,6 +111,8 @@ class GridMapBuilder(Node):
         self.grid_map = np.zeros((self.grid_size_x, self.grid_size_y), dtype=np.int8)
         # Current pose of the robot
         self.current_pose = None
+        self.publish_goals_cooldown = 0
+        self.publish_goals_queue = 0
 
         ### EXPLORATION
         self.bfs = ExplorationEvent(
@@ -219,6 +221,7 @@ class GridMapBuilder(Node):
         self.publish_grid_map()
 
     def broadcast_goal(self, resized_map, chance=0):
+
         if self.current_pose is None:
             return
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
@@ -228,8 +231,15 @@ class GridMapBuilder(Node):
 
         if self.bfs.reset_dirty_bit() or dirty_bit:
             goal_points = self.bfs.overall_destinations()
-            self.publisher_goal_point.publish(PointToRosSerializers().serialize(goal_points))
+            data = PointToRosSerializers().serialize(goal_points)
+            self.publish_goals_queue = data
+        if time.time() < self.publish_goals_cooldown:
+            return
+        if self.publish_goals_queue is not None:
+            self.publisher_goal_point.publish(self.publish_goals_queue)
+            self.publish_goals_queue = None
             print(f"Publishing. Current pose: {self._resized_map.actual_to_px((self.current_pose.x, self.current_pose.y))}")
+            self.publish_goals_cooldown = time.time() + 2
 
     def bresenham_line(self, x0, y0, x1, y1):
         """Generate coordinates of the line from (x0, y0) to (x1, y1) using Bresenham's algorithm."""

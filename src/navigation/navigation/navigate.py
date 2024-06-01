@@ -118,7 +118,7 @@ class Navigate(Node):
         if time.time() < self.redo_bfs_expire:
             return
         self.publisher_goal_point_redo_bfs.publish(Empty())
-        self.redo_bfs_expire = time.time() + 2000
+        self.redo_bfs_expire = time.time() + 2
 
     def robot_pose_callback(self, msg):
         self.robot_pose = msg

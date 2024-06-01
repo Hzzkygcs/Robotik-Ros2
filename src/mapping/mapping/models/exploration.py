@@ -259,9 +259,9 @@ class DoBfs(ExplorationBase):
 
     def bfs_find_route(self, stopping_condition, empty_value=None):
         numpyMap = self.numpyMap
-        self.routes.clear()
         if numpyMap is None:
             return
+        self.routes.clear()
         queue = BfsQueue()
         initial_origin: NodeInformation = self.shortest_maps[self.currentPos[1]][self.currentPos[0]]
         direction = South
