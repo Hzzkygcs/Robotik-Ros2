@@ -1,5 +1,6 @@
 import itertools
 import math
+import warnings
 
 import matplotlib.pyplot as plt
 import rclpy
@@ -134,6 +135,15 @@ class GridMapBuilder(Node):
 
     def goal_point_is_reached(self, *msg):
         print(f"Reached destination, redo BFS. current: {self.bfs.overall_destinations()}")
+        destinations = self.bfs.overall_destinations()
+        if len(destinations) > 0:
+            final_dest = destinations[-1]
+            dx = self.current_pose.x - final_dest[0]
+            dy = self.current_pose.y - final_dest[1]
+            length = math.sqrt(dx * dx + dy * dy)
+            if length > 0.5:
+                warnings.warn("Cancelling... Was marked as Finished/Reached destination but its still far away from destination. Probably due to latency/delay")
+                return
         self.broadcast_goal(self.map_for_bfs, 100)
 
     def goal_point_is_blocked(self, *msg):
@@ -142,7 +152,7 @@ class GridMapBuilder(Node):
 
     def goal_point_redo_bfs(self, *arg):
         print(f"Requested to redo BFS")
-        self.broadcast_goal(self._resized_map, 100)
+        # self.broadcast_goal(self._resized_map, 100)
 
     def redo_bfs_if_blocked(self, msg):
         x1, y1, x2, y2 = msg.data
@@ -214,9 +224,9 @@ class GridMapBuilder(Node):
         self.bfs.try_set_map(resized_map, (self.current_pose.x, self.current_pose.y), chance)
         self.displayer.set_destinations(self.bfs.overall_destinations())
 
-        self.bfs.tick_to_check_if_need_replan(self.current_pose)
+        dirty_bit = self.bfs.tick_to_check_if_need_replan(resized_map, self.current_pose)
 
-        if self.bfs.reset_dirty_bit():
+        if self.bfs.reset_dirty_bit() or dirty_bit:
             goal_points = self.bfs.overall_destinations()
             self.publisher_goal_point.publish(PointToRosSerializers().serialize(goal_points))
             print(f"Publishing. Current pose: {self._resized_map.actual_to_px((self.current_pose.x, self.current_pose.y))}")

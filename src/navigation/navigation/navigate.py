@@ -1,4 +1,5 @@
 import math
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -22,12 +23,12 @@ from src.navigation.navigation.models.visionblockedcheck import VisionBlockedChe
 TICK_RATE = 0.01  # in seconds
 FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.05
-MAX_ANGLE_DEGREE_TOWARD_GOAL = 90
+MAX_ANGLE_DEGREE_TOWARD_GOAL = 35
 # MAX_ANGLE_DEGREE_TOWARD_GOAL = 115
 DISTANCE_THRESHOLD_TO_GOAL = 0.2
 
 MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH = 0.8
-OBSTACLE_AVOID_RAYCAST_LENGTH = 1.0
+OBSTACLE_AVOID_RAYCAST_LENGTH = 0.6
 GO_BACKWARD_OBSTACLE_DIST = 0.27
 GO_BACKWARD_ROBOT_RADIUS = 0.25
 # GO_BACKWARD_OBSTACLE_DIST = 0.22
@@ -85,8 +86,10 @@ class Navigate(Node):
         self.timer = self.create_timer(TICK_RATE, self.navigate)
 
         self.vision_blocked_checker = VisionBlockedChecker(math.radians(10))
-        self.straight_raycast = ObstacleAvoidancePathFinder()
-        self.straight_raycast_visualizer = ObstacleAvoidancePathFinderVisualizer(self.straight_raycast)
+        self.obstacle_avoidance_trajectory = ObstacleAvoidancePathFinder()
+        self.straight_raycast = StraightVirtualRayCast(OBSTACLE_AVOID_RAYCAST_LENGTH)
+        self.obstacle_avoidance_tracjectory_visualizer = ObstacleAvoidancePathFinderVisualizer(self.obstacle_avoidance_trajectory)
+        self.obstacle_avoidance_tracjectory_visualizer.update_frame()
         self.backward_penalty = 0  # if it reaches certain number, it will not go backward no mater what
         self.laser_scan = LaserScan()
         self.laser_scan_received = False
@@ -100,7 +103,9 @@ class Navigate(Node):
         self.goal_point_received = False
         self.arrived = True
         self.movement_override = NopMovementOverride()
+        self.redo_bfs_expire = 0
         self.redo_bfs()
+
 
     def listener_scan(self, msg):
         self.laser_scan = msg
@@ -110,7 +115,10 @@ class Navigate(Node):
         self.movement_override = RotateInPlace(3, 2)
 
     def redo_bfs(self):
+        if time.time() < self.redo_bfs_expire:
+            return
         self.publisher_goal_point_redo_bfs.publish(Empty())
+        self.redo_bfs_expire = time.time() + 2000
 
     def robot_pose_callback(self, msg):
         self.robot_pose = msg
@@ -161,7 +169,6 @@ class Navigate(Node):
     def next_goal_point(self):
         if (self.goal_point_index+1)*2 >= len(self.goal_points):
             self.handle_arrived()
-            print("FINISHED")
             return
         self.goal_point_index += 1
         print(f"Moving to next goal_point: {self.goal_point_index} {self.get_goal_point(self.goal_point_index)}")
@@ -181,9 +188,9 @@ class Navigate(Node):
     @property
     def goal_point(self):
         ret = Point()
-        if self.straight_raycast.virtual_goal_point is None:
+        if self.obstacle_avoidance_trajectory.virtual_goal_point is None:
             return self._goal_point
-        virtual_goal_point = self.straight_raycast.virtual_goal_point
+        virtual_goal_point = self.obstacle_avoidance_trajectory.virtual_goal_point
         ret.x = virtual_goal_point[0]
         ret.y = virtual_goal_point[1]
         ret = self.get_absolute_point_from_relative_point(ret)
@@ -209,32 +216,13 @@ class Navigate(Node):
         angles = np.linspace(self.laser_scan.angle_min, self.laser_scan.angle_max, len(self.laser_scan.ranges))
 
         self.straight_raycast.raycast_length = max(OBSTACLE_AVOID_RAYCAST_LENGTH,
-                                                   0.5 + distance(self.goal_point, self.position))
+                                                                0.5 + distance(self.goal_point, self.position))
         self.straight_raycast.obstacle_hits = distances, angles
-        self.straight_raycast.update_points(np.zeros((2,)), self.get_point_relative_to_orientation(self._goal_point)[2])
+        self.obstacle_avoidance_trajectory.obstacle_hits = distances, angles
+        self.obstacle_avoidance_trajectory.update_points(np.zeros((2,)), self.get_point_relative_to_orientation(self._goal_point)[2])
         self.vision_blocked_checker.set_obstacle_distances(distances)
         self.vision_blocked_checker.set_obstacle_angles(angles)
 
-
-        #
-        # shortest = distances.argmin()
-        # short_angle = angles[shortest]  # Left of robot is positive, right of robot is negative, 0 is front
-        # short_distance = distances[shortest]
-        #
-        # shortest_direction_absolute = (self.robot_pose.theta + short_angle) % 6.28
-        # predicted_goal_angle = shortest_direction_absolute
-        # if predicted_goal_angle > 3.14:  # Direction relative to robot closest to obstacle
-        #     predicted_goal_angle += -6.28
-        # obstacle_on_left = short_angle > 0
-        # avoid_distance = 0.33
-        # too_close = False
-        #
-        # if short_distance > avoid_distance:
-        #     return False
-        # print(f"Too close!: {predicted_goal_angle}")
-        # # self.robot_go_bakcward(obstacle_on_left)
-        # self.publisher_goal_point_blocked.publish(Empty())
-        # return True
 
 
     def robot_go_bakcward(self, obstacle_left):
@@ -294,12 +282,12 @@ class Navigate(Node):
         if twist is not None:
             self.publisher_cmd_vel.publish(twist)
             return
-        if  self.goal_distance(original=True) < DISTANCE_THRESHOLD_TO_GOAL and math.degrees(abs(self.goal_angle())) < 8:
+        if  self.goal_distance(original=True) < DISTANCE_THRESHOLD_TO_GOAL and math.degrees(abs(self.goal_angle())) < 20:
             self.publisher_cmd_vel.publish(Twist())
             self.next_goal_point()
             return
 
-        goal_angle_deg = math.degrees(self.goal_angle(original_goal=True))
+        goal_angle_deg = math.degrees(self.goal_angle())
         if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:
             self.movement_override = self._get_rotate_in_place()
 
@@ -308,8 +296,8 @@ class Navigate(Node):
         distance = self.goal_distance()
 
         self.update_straight_raycast()
-        if self.straight_raycast_visualizer is not None:
-            self.straight_raycast_visualizer.update_frame()
+        if self.obstacle_avoidance_tracjectory_visualizer is not None:
+            self.obstacle_avoidance_tracjectory_visualizer.update_frame()
 
 
 
@@ -331,30 +319,30 @@ class Navigate(Node):
             theta += 2 * np.pi
 
 
-        # closest_overall = self.straight_raycast.closest_overall
-        # self.backward_penalty = max(0, self.backward_penalty-1)
-        # if closest_overall is not None:
-        #     obstacle_at_left = closest_overall[0] < 0
-        #     constant = 5
-        #     magnitude = 9 - 4 * closest_overall[1]/OBSTACLE_AVOID_RAYCAST_LENGTH
-        #     magnitude *= max(1,SPEED_MULTIPLIER)
-        #     magnitude = max(1, magnitude)
-        #     if obstacle_at_left and theta > 0:  # if obstacle on left and we're heading left
-        #         theta = math.radians(-5 * magnitude - constant)  # go to slightly right
-        #         # self.movement_override = NopMovementOverride()
-        #     elif not obstacle_at_left and theta < 0:  # if obstacle on right and we're heading right
-        #         theta = math.radians(5 * magnitude + constant)  # go to slightly left
-        #         # self.movement_override = NopMovementOverride()
-        #
-        #     max_backward_duration = 3/TICK_RATE
-        #     stop_backward_duration = 3/TICK_RATE
-        #     condition = closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and abs(closest_overall[0]) <= GO_BACKWARD_ROBOT_RADIUS
-        #     if condition and self.backward_penalty < max_backward_duration:
-        #         self.backward_penalty += 2  # in total +1. +2 because we do -1 earlier
-        #         self.robot_go_bakcward(obstacle_at_left)
-        #         self.redo_bfs()
-        #     elif condition and self.backward_penalty > max_backward_duration:
-        #         self.backward_penalty += min(max_backward_duration+stop_backward_duration, stop_backward_duration)
+        closest_overall = self.straight_raycast.closest_overall
+        self.backward_penalty = max(0, self.backward_penalty-1)
+        if closest_overall is not None:
+            obstacle_at_left = closest_overall[0] < 0
+            # constant = 5
+            # magnitude = 9 - 4 * closest_overall[1]/OBSTACLE_AVOID_RAYCAST_LENGTH
+            # magnitude *= max(1,SPEED_MULTIPLIER)
+            # magnitude = max(1, magnitude)
+            # if obstacle_at_left and theta > 0:  # if obstacle on left and we're heading left
+            #     theta = math.radians(-5 * magnitude - constant)  # go to slightly right
+            #     # self.movement_override = NopMovementOverride()
+            # elif not obstacle_at_left and theta < 0:  # if obstacle on right and we're heading right
+            #     theta = math.radians(5 * magnitude + constant)  # go to slightly left
+            #     # self.movement_override = NopMovementOverride()
+
+            max_backward_duration = 3/TICK_RATE
+            stop_backward_duration = 3/TICK_RATE
+            condition = closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and abs(closest_overall[0]) <= GO_BACKWARD_ROBOT_RADIUS
+            if condition and self.backward_penalty < max_backward_duration:
+                self.backward_penalty += 2  # in total +1. +2 because we do -1 earlier
+                self.robot_go_bakcward(obstacle_at_left)
+                self.redo_bfs()
+            elif condition and self.backward_penalty > max_backward_duration:
+                self.backward_penalty += min(max_backward_duration+stop_backward_duration, stop_backward_duration)
 
 
         cmd_vel = Twist()

@@ -81,10 +81,12 @@ class ObstacleAvoidancePathFinder:
 
         # self.avoid_obstacle_to_right is None check so that this code will be run only once in a while
         if self.middle is not None and self.avoid_obstacle_to_right is None:
-            intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
             tolerance = 0.02  # arbitrary number for floating point errors
-            middle_point_collides_with_other_obstacle = (intersection_distance < self.robot_radius - tolerance)
-            if middle_point_collides_with_other_obstacle.any():
+            intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
+            mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance).any()
+            intersection_distance, _ = pnt2line(coordinates, self.middle, self.goal_point)
+            mid_pnt_collides_obstacle = mid_pnt_collides_obstacle or (intersection_distance < self.robot_radius//2 - tolerance).any()
+            if mid_pnt_collides_obstacle.any():
                 print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
                       f"with other obstacle. Choosing the other side...")
                 avoid_obstacle_to_right = not avoid_obstacle_to_right  # choose the other way around
