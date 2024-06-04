@@ -1,7 +1,6 @@
 from __future__ import annotations
 import abc
 import collections
-import heapq
 import math
 import random
 
@@ -142,9 +141,8 @@ class ExploreUnknownMaps(ExplorationBase):
 
 
 class BfsToDestination(ExplorationBase):
-    def __init__(self, destination_actual_coordinate: tuple, max_num_of_compressed, cost_of_cell):
-        self.bfs = DoDijkstra(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD, max_num_of_compressed,
-                              cost_of_cell)
+    def __init__(self, destination_actual_coordinate: tuple, max_num_of_compressed):
+        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD, max_num_of_compressed)
         self.numpyMap = None
         self.canvas = None
         self.arrived = False
@@ -216,6 +214,20 @@ class DoBfs(ExplorationBase):
             origin_coord = pixel_coord
         self.origin_coord = origin_coord  # debugging purpose only
         return True
+        # final_node = self.bfs_find_route(self.stopping_condition)
+        # self.final_node = final_node  # debugging purpose only
+        # origin_coord = None
+        #
+        # last_direction = None
+        # for node_x, node_y, node_direction_to_source in self.backtrack_routes(final_node):
+        #     if node_direction_to_source == last_direction:
+        #         continue
+        #     last_direction = node_direction_to_source
+        #     pixel_coord = (node_x, node_y)
+        #     act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
+        #     self.routes.appendleft((act_x, act_y, pixel_coord))
+        #     origin_coord = pixel_coord
+        # self.origin_coord = origin_coord  # debugging purpose only
 
     def get_destination(self) -> tuple:
         if len(self.routes) == 0:
@@ -296,54 +308,6 @@ class DoBfs(ExplorationBase):
     def tick_to_check_if_need_replan(self, *_):
         return False
 
-class DoDijkstra(DoBfs):
-    def __init__(self, stopping_condition, wall_condition, max_num_of_compressed, cost_of_cell):
-        super().__init__(stopping_condition, wall_condition, max_num_of_compressed)
-        # receive parameters: NodeInformation of current candidate cell, cell value, direction_to_current_candidate_cell, direction_to_current_shortest_cell
-        self.cost_of_cell = cost_of_cell
-
-    def bfs_find_route(self, stopping_condition, empty_value=None):
-        numpyMap = self.numpyMap
-        if numpyMap is None:
-            return
-        self.routes.clear()
-        queue = []
-
-        initial_origin: NodeInformation = self.shortest_maps[self.currentPos[1]][self.currentPos[0]]
-        initial_origin.shortest_distance = 0
-        heapq.heappush(queue, initial_origin)
-
-        allow_wall = self.initialPositionIsWall
-        while True:
-            if len(queue) == 0:  # queue empty, no more BFS
-                return empty_value
-            node_info: NodeInformation = heapq.heappop(queue)
-
-            if allow_wall:  # allow wall will be set to False at the first time a non-wall cell is met
-                allow_wall = self.wall_condition(*node_info.xy, self.numpyMap.get_px(node_info.xy))
-            if stopping_condition(node_info):
-                return node_info
-
-            for next_dir in range(TOTAL_DIRECTION):
-                dx = DIR_X[next_dir]
-                dy = DIR_Y[next_dir]
-                y = node_info.y + dy
-                x = node_info.x + dx
-                if not (0 <= x < self.numpyMap.px_width) or not (0 <= y < self.numpyMap.px_height):
-                    continue
-                if self.wall_condition(x, y, self.numpyMap.canvas[y][x]) and not allow_wall:
-                    continue
-                next_node_info: NodeInformation = self.shortest_maps[y][x]
-                cell_cost = self.cost_of_cell(next_node_info, self.numpyMap.get_px(node_info.xy),
-                                              next_dir, node_info.direction_to_here)
-                total_cost = node_info.shortest_distance + cell_cost
-                if next_node_info.shortest_distance <= total_cost:
-                    continue
-                next_node_info.set_shortest_distance(total_cost, next_dir)
-                heapq.heappush(queue, next_node_info)
-
-
-
 class BfsQueue:
     def __init__(self):
         self.queue = collections.deque()
@@ -380,7 +344,7 @@ class BfsQueue:
 
 
 class NodeInformation:
-    def __init__(self, x, y, current_cost=None):
+    def __init__(self, x, y):
         self.x = x
         self.y = y
         self.shortest_distance = float('inf')
@@ -392,8 +356,7 @@ class NodeInformation:
         return INVERSE[self.direction_to_here]
 
     def set_shortest_distance(self, shortest_distance, direction_to_here):
-        if shortest_distance > self.shortest_distance:
-            return
+        assert shortest_distance < self.shortest_distance
         self.shortest_distance = shortest_distance
         self.direction_to_here = direction_to_here
         self.shortest_distance_initialized = True
@@ -401,8 +364,3 @@ class NodeInformation:
     @property
     def xy(self):
         return self.x, self.y
-
-    def __le__(self, other: NodeInformation):
-        return self.shortest_distance <= other.shortest_distance
-    def __lt__(self, other: NodeInformation):
-        return self.shortest_distance < other.shortest_distance

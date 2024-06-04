@@ -169,9 +169,9 @@ class Navigate(Node):
             self.goal_point_index = index_of_farthest_node_that_satisfy_condition + 1
         finally:
             print(f"{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
-            # for i in range(self.goal_point_index, all_target.shape[0]):
-            #     if not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose):
-            #         self.goal_point_index = i
+            for i in range(self.goal_point_index, all_target.shape[0]):
+                if not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose):
+                    self.goal_point_index = i
 
 
 
