@@ -26,7 +26,7 @@ FALLBACK_DISTANCE = 0.66
 AVOID_DISTANCE = 0.05
 MAX_ANGLE_DEGREE_TOWARD_GOAL = 35
 # MAX_ANGLE_DEGREE_TOWARD_GOAL = 115
-DISTANCE_THRESHOLD_TO_GOAL = 0.3
+DISTANCE_THRESHOLD_TO_GOAL = 0.2
 
 MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH = 0.8
 OBSTACLE_AVOID_RAYCAST_LENGTH = 0.6
@@ -34,7 +34,7 @@ GO_BACKWARD_OBSTACLE_DIST = 0.27
 GO_BACKWARD_ROBOT_RADIUS = 0.25
 # GO_BACKWARD_OBSTACLE_DIST = 0.22
 
-SPEED_MULTIPLIER = 1.2
+SPEED_MULTIPLIER = 1
 # SPEED_MULTIPLIER = 1.2 / 0.6
 
 class Navigate(Node):
@@ -93,7 +93,7 @@ class Navigate(Node):
         fig.canvas.manager.set_window_title('Navigation')
         self.obstacle_avoidance_tracjectory_visualizer = ObstacleAvoidancePathFinderVisualizer(self.obstacle_avoidance_trajectory, fig=fig)
         self.obstacle_avoidance_tracjectory_visualizer.update_frame()
-        self.backward_cooldown = 0  # if it reaches certain number, it will not go backward no mater what
+        self.backward_penalty = 0  # if it reaches certain number, it will not go backward no mater what
         self.laser_scan = LaserScan()
         self.laser_scan_received = False
         self.obstacle_distances: np.ndarray = None
@@ -116,7 +116,7 @@ class Navigate(Node):
         if self.obstacle_distances is None:
             return 1
         min_obstacle_distance  = self.obstacle_distances.min()
-        return np.clip(1, 3 * min_obstacle_distance, 2.1)
+        return np.clip(1, 2.5 * min_obstacle_distance, 2)
 
     def listener_scan(self, msg):
         self.laser_scan = msg
@@ -167,7 +167,6 @@ class Navigate(Node):
             # which is the (i+1)-th index of all_target (because line_segment_ends[i] = all_target[i+1]
             self.goal_point_index = index_of_farthest_node_that_satisfy_condition + 1
         finally:
-            print(f"{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
             self.try_to_skip_visible_goal_points(distances)
 
     def try_to_skip_visible_goal_points(self, distances=None):
@@ -183,11 +182,10 @@ class Navigate(Node):
             distances = line_segment_distances(curr_pos, line_segment_starts, line_segment_ends)
         for i in range(self.goal_point_index, all_target.shape[0]):
             vision_blocked = not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose)
-            too_far = np.linalg.norm(all_target[i, :] - curr_pos) > 4*DISTANCE_THRESHOLD_TO_GOAL
+            too_far = np.linalg.norm(all_target[i, :] - curr_pos) > 2*DISTANCE_THRESHOLD_TO_GOAL
             if vision_blocked and not too_far:
                 self.goal_point_index = i
-        if before < self.goal_point_index:
-            print(f"{before}->{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
+        print(f"{before}->{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
 
 
     def get_goal_point(self, index):
@@ -258,8 +256,7 @@ class Navigate(Node):
     def robot_go_backward(self, obstacle_left, obstacle_hit_penalty, on_done_callback=None):
         self.get_logger().info(f"GOING BACKWARD. obstacle at the {'left' if obstacle_left else 'right'}")
         def penalty():
-            self.backward_cooldown = time.time() + obstacle_hit_penalty
-            print(f"CANNOT GO BACKWARD. SETTING COOLDOWN {obstacle_hit_penalty}")
+            self.backward_penalty += obstacle_hit_penalty
 
         expire_duration = 0
         goal_is_in_left_func = lambda: self.goal_angle() > 0
@@ -356,7 +353,7 @@ class Navigate(Node):
 
 
         closest_overall = self.straight_raycast.closest_overall
-        self.backward_cooldown = max(0, self.backward_cooldown - 1)
+        self.backward_penalty = max(0, self.backward_penalty-1)
         if closest_overall is not None:
             obstacle_at_left = closest_overall[0] < 0
             # constant = 5
@@ -370,9 +367,11 @@ class Navigate(Node):
             #     theta = math.radians(5 * magnitude + constant)  # go to slightly left
             #     # self.movement_override = NopMovementOverride()
 
+            max_backward_duration = 2/TICK_RATE
+            stop_backward_duration = 2/TICK_RATE
             condition = closest_overall[1] < GO_BACKWARD_OBSTACLE_DIST and abs(closest_overall[0]) <= GO_BACKWARD_ROBOT_RADIUS
-            if condition and time.time() >  self.backward_cooldown:
-                self.robot_go_backward(obstacle_at_left, 1.5, on_done_callback=self.redo_bfs)
+            if condition and self.backward_penalty < max_backward_duration:
+                self.robot_go_backward(obstacle_at_left, stop_backward_duration, on_done_callback=self.redo_bfs)
 
 
         cmd_vel = Twist()
@@ -384,7 +383,7 @@ class Navigate(Node):
             # if abs(goal_angle_adjusted - self.robot_pose.theta) < 0.2:  # Only move when facing the correct direction
             #     print("Facing correctly")
             #     cmd_vel.linear.y = 0.6
-            cmd_vel.angular.z = 2.0 * theta * (SPEED_MULTIPLIER * variable_multiplier)**0.25
+            cmd_vel.angular.z = 2.0 * theta * np.sqrt(SPEED_MULTIPLIER * variable_multiplier)
         else:
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0

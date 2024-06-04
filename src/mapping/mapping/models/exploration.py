@@ -268,7 +268,7 @@ class DoBfs(ExplorationBase):
         self.routes.clear()
         queue = BfsQueue()
         initial_origin: NodeInformation = self.shortest_maps[self.currentPos[1]][self.currentPos[0]]
-        direction = North
+        direction = South
         queue.push(direction, initial_origin)
         queue.new_distance(initializeOnly=True)  # starts from 0 distance for the origin itself
         allow_wall = self.initialPositionIsWall
