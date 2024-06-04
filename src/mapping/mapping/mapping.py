@@ -22,6 +22,9 @@ from models.mapconstants import ALGORITHM_RESOLUTION
 from models.numpymap import NumpyMap, NumpyMapDisplayer
 from models.exploration import ExplorationEvent, BfsToDestination, ExploreUnknownMaps
 from models.mapconstants import *
+from src.mapping.mapping.models.exploration import NodeInformation
+from src.mapping.mapping.models.numpymap import apply_blur
+
 
 class GridMapBuilder(Node):
     def __init__(self):
@@ -98,9 +101,9 @@ class GridMapBuilder(Node):
         fig.set_figheight(20 / size_divider)
         fig.set_figwidth(15 / size_divider)
         ax2 = fig.add_subplot(212)
-        self.displayer = NumpyMapDisplayer(self.map, fig, ax1)
+        self.displayer = NumpyMapDisplayer(self.map, fig, ax1, apply_thresholding=True)
         self.displayer.update_frame()
-        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2)
+        self.displayer_abstract = NumpyMapDisplayer(self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION), fig, ax2, apply_thresholding=False)
         self.pause_mapping = False
         self.start_time = None
 
@@ -120,18 +123,27 @@ class GridMapBuilder(Node):
         max_num_of_compressed = round(MAX_COMPRESSION_LENGTH // ALGORITHM_RESOLUTION)
         self.bfs = ExplorationEvent(
             ExploreUnknownMaps(max_num_of_compressed), lambda: self.set_bfs(ExplorationEvent(
-                BfsToDestination((6.64, 2.8), max_num_of_compressed),
+                BfsToDestination((6.64, 2.8), max_num_of_compressed, self.dijkstra_cost_of_cell),
                 lambda: self.set_bfs(
-                    ExplorationEvent(BfsToDestination((6.275, -2.225), max_num_of_compressed), lambda: print("FINISHED!"))
+                    ExplorationEvent(BfsToDestination((6.275, -2.225), max_num_of_compressed, self.dijkstra_cost_of_cell),
+                                     lambda: print("FINISHED!"))
             ))))
 
         self.is_processing = False
         self.load_explored_map()
 
+    def dijkstra_cost_of_cell(self, nodeInfo: NodeInformation, cell_value, prev_direction, curr_direction):
+        cost = 0
+        cost += math.sqrt(abs(prev_direction - prev_direction))
+        cell_value_cost = 20 * cell_value / 255
+        return cost + cell_value_cost*cell_value_cost*cell_value_cost
+
+
+
     def load_explored_map(self):  # for debugging purpose only
         with open("explored_map.pkl", "rb") as f:
             self.map = pickle.load(f)
-
+        self
 
     def set_bfs(self, new_bfs):
         self.bfs = new_bfs
@@ -220,8 +232,9 @@ class GridMapBuilder(Node):
 
         # self._resized_map = self.map
         self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
+        self._resized_map.canvas = dilation(apply_blur(self._resized_map.canvas).reshape(self._resized_map.canvas.shape))
 
-        self.map_for_bfs.canvas = dilation(self.map_for_bfs.canvas)
+        self.map_for_bfs.canvas = self.map_for_bfs.canvas
         self.displayer_abstract.set_new_map(self.map_for_bfs)
         self.displayer.set_new_map(self.map)
 
@@ -292,8 +305,8 @@ class GridMapBuilder(Node):
 
 def dilation(img):
     return img
-    # kernel = np.ones((3, 3), np.uint8)
-    # return cv2.dilate(img, kernel, iterations=1)
+    kernel = np.ones((3, 3), np.uint8)
+    return cv2.dilate(img, kernel, iterations=1)
 
 
 def main(args=None):

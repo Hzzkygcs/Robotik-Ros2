@@ -189,8 +189,9 @@ class NumpyMap:
 
 
 class NumpyMapDisplayer:
-    def __init__(self, map: NumpyMap, fig=None, ax=None):
+    def __init__(self, map: NumpyMap, fig=None, ax=None, apply_thresholding=True):
         self.map = map
+        self.apply_thresholding = apply_thresholding
         self.destinations = []
         self.fig = plt.figure() if fig is None else fig
         self.ax = self.fig.add_subplot(2, 1, 1) if ax is None else ax
@@ -198,7 +199,10 @@ class NumpyMapDisplayer:
         self.fig.show()
 
     def update_frame(self):
-        copied_canvas = to_rgb(apply_thresholding(self.map.canvas))
+        canvas = self.map.canvas
+        if self.apply_thresholding:
+            canvas = apply_thresholding(canvas)
+        copied_canvas = to_rgb(canvas)
         self.draw_destinations(copied_canvas)
 
         if self.map.robot_pos is not None:
@@ -230,9 +234,9 @@ class NumpyMapDisplayer:
             cv2.circle(copied_canvas, (px_x, px_y), 2, (0, 255, 0), thickness=10)
 
 
-def numpy_blur(data):
+def apply_blur(data):
     # Define the standard deviation for the Gaussian kernel
-    sigma = 1.0
+    sigma = 2.0
     kernel_size = (int(2 * np.ceil(3 * sigma) + 1), int(2 * np.ceil(3 * sigma) + 1))
 
     # Apply Gaussian blur to the 2D image with 3 channels
