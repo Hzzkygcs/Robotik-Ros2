@@ -192,12 +192,12 @@ class DoBfs(ExplorationBase):
         self.wall_condition = wall_condition
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple, redo_bfs=True):
-        self.routes.clear()
         self.numpyMap = numpyMap
         self.currentActualPos = currentActualPos
         self.currentPos = numpyMap.actual_to_px(self.currentActualPos)
         if not redo_bfs:
             return True
+        self.routes.clear()
         self.initialPositionIsWall = self.wall_condition(self.currentPos[0], self.currentPos[1],
                                                          numpyMap.canvas[self.currentPos[1]][self.currentPos[0]])
         self.shortest_maps = [[NodeInformation(x, y) for x in range(self.numpyMap.px_width)]

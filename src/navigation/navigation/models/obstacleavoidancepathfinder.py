@@ -1,4 +1,5 @@
 import math
+import time
 
 import cv2
 import matplotlib
@@ -23,6 +24,7 @@ class ObstacleAvoidancePathFinder:
         self.goal_point = None
         self.current_position = None
         self.middle = None
+        self.reassess_avoid_obstacle_to_right_caller = CallLimiter(self.reassess_avoid_obstacle_to_right, 0.1)
 
         self.distance_of_being_avoided_obstacle = 0
         self.avoid_obstacle_to_right = None
@@ -81,15 +83,9 @@ class ObstacleAvoidancePathFinder:
 
         # self.avoid_obstacle_to_right is None check so that this code will be run only once in a while
         if self.middle is not None and self.avoid_obstacle_to_right is None:
-            tolerance = 0.02  # arbitrary number for floating point errors
-            intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
-            mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance).any()
-            intersection_distance, _ = pnt2line(coordinates, self.middle, self.goal_point)
-            mid_pnt_collides_obstacle = mid_pnt_collides_obstacle or (intersection_distance < self.robot_radius//2 - tolerance).any()
-            if mid_pnt_collides_obstacle.any():
-                print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
-                      f"with other obstacle. Choosing the other side...")
-                avoid_obstacle_to_right = not avoid_obstacle_to_right  # choose the other way around
+            avoid_obstacle_to_right = self.reassess_avoid_obstacle_to_right(coordinates)
+        else:
+            avoid_obstacle_to_right  =self.reassess_avoid_obstacle_to_right_caller((coordinates,), avoid_obstacle_to_right)
         self.avoid_obstacle_to_right = avoid_obstacle_to_right
 
         if selected_group is not None:
@@ -99,6 +95,22 @@ class ObstacleAvoidancePathFinder:
             if abs(self.distance_of_being_avoided_obstacle-distance) > self.distance_difference_threshold_for_different_obj:
                 self.avoid_obstacle_to_right = None  # reset preference
             self.distance_of_being_avoided_obstacle = distance
+
+    def reassess_avoid_obstacle_to_right(self, coordinates, avoid_obstacle_to_right=None):
+        if avoid_obstacle_to_right is None:
+            avoid_obstacle_to_right = self.avoid_obstacle_to_right
+        if avoid_obstacle_to_right is None:
+            return None
+        tolerance = 0.02  # arbitrary number for floating point errors
+        intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
+        mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance).any()
+        intersection_distance, _ = pnt2line(coordinates, self.middle, self.goal_point)
+        mid_pnt_collides_obstacle = mid_pnt_collides_obstacle or (intersection_distance < self.robot_radius//2 - tolerance).any()
+        if mid_pnt_collides_obstacle.any():
+            print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
+                  f"with other obstacle. Choosing the other side...")
+            avoid_obstacle_to_right = not avoid_obstacle_to_right  # choose the other way around
+        return avoid_obstacle_to_right
 
     def _calculate_middle_point(self, obstacle_point, obstacle_intersection_with_start_and_goal, avoid_to_right):
         obstacle_radius = self.robot_radius
@@ -149,6 +161,22 @@ class ObstacleAvoidancePathFinder:
         if self.goal_point is None:
             return None
         return self.goal_point[0]
+
+
+
+class CallLimiter:
+    def __init__(self, function_to_call, delay_between_calls):  # in seconds
+        self.last_call = float('-inf')
+        self.delay_between_calls = delay_between_calls
+        self.function_to_call = function_to_call
+
+    def __call__(self, args, return_value_if_not_callable_yet):
+        if time.time() - self.last_call < self.delay_between_calls:
+            return return_value_if_not_callable_yet
+        self.last_call = time.time()
+        return self.function_to_call(*args)
+
+
 
 
 class ObstacleAvoidancePathFinderVisualizer:

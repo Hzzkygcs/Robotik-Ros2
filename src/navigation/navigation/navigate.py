@@ -118,7 +118,7 @@ class Navigate(Node):
         if time.time() < self.redo_bfs_expire:
             return
         self.publisher_goal_point_redo_bfs.publish(Empty())
-        self.redo_bfs_expire = time.time() + 2
+        self.redo_bfs_expire = time.time() + 3
 
     def robot_pose_callback(self, msg):
         self.robot_pose = msg
@@ -128,38 +128,44 @@ class Navigate(Node):
             self.goal_points = [self.robot_pose.x, self.robot_pose.y]
 
     def goal_point_callback(self, msg):
-        self.goal_points = msg.data
+        self.goal_points = list(msg.data)
         self.goal_point_index = 0
         self.goal_point_received = True
         self.arrived = False
         self.__update_current_goal_point_index()
-        print(f"new goal point received. Current goal point index: {self.goal_point_index}")
+        print(f"new goal point received. Current goal point index: {self.goal_point_index}. "
+              f"{np.array(self.goal_points).reshape(-1, 2).round(1)}")
 
     def __update_current_goal_point_index(self):
         number_of_path_planning = self.goal_points_length
         if number_of_path_planning < 2:
             return
         curr_pos = np.array([self.robot_pose.x, self.robot_pose.y])
-        all_target = np.empty((number_of_path_planning, 2))
-        for i in range(number_of_path_planning):
-            x, y = self.get_goal_point(i)
-            all_target[i, 0] = x
-            all_target[i, 1] = y
-        for i in range(all_target.shape[0]-1, -1, -1):
-            if not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose):
-                self.goal_point_index = i
-                return
+        all_target = np.array(self.goal_points).reshape(-1, 2)
+        # all_target = np.empty((number_of_path_planning, 2))
+        # for i in range(number_of_path_planning):
+        #     x, y = self.get_goal_point(i)
+        #     all_target[i, 0] = x
+        #     all_target[i, 1] = y
 
-        # line_segment_starts = all_target[0:number_of_path_planning-1, :]
-        # line_segment_ends = all_target[1:number_of_path_planning, :]
-        # distances = line_segment_distances(curr_pos, line_segment_starts, line_segment_ends)
-        # index_of_the_first_true_of_reversed_arr = np.argmax(distances[::-1] <= MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH)
-        # index_of_farthest_node_that_satisfy_condition = len(distances) - index_of_the_first_true_of_reversed_arr - 1
-        # if distances[index_of_farthest_node_that_satisfy_condition] > MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH:
-        #     return
-        # # if ith (starts from 0) segment is the greatest, then we will heading to the line_segment_ends of the ith segment,
-        # # which is the (i+1)-th index of all_target (because line_segment_ends[i] = all_target[i+1]
-        # self.goal_point_index = index_of_farthest_node_that_satisfy_condition + 1
+        # for i in range(all_target.shape[0]-1, -1, -1):
+        #     if not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose):
+        #         self.goal_point_index = i
+        #         return
+
+        line_segment_starts = all_target[0:number_of_path_planning-1, :]
+        line_segment_ends = all_target[1:number_of_path_planning, :]
+        distances = line_segment_distances(curr_pos, line_segment_starts, line_segment_ends)
+
+        index_of_the_first_true_of_reversed_arr = np.argmax(distances[::-1] <= MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH)
+        index_of_farthest_node_that_satisfy_condition = len(distances) - index_of_the_first_true_of_reversed_arr - 1
+        if distances[index_of_farthest_node_that_satisfy_condition] > MAXIMUM_DISTANCE_TOLERANCE_TO_SKIP_SOME_PATH:
+            print(f"{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
+            return
+        # if ith (starts from 0) segment is the greatest, then we will heading to the line_segment_ends of the ith segment,
+        # which is the (i+1)-th index of all_target (because line_segment_ends[i] = all_target[i+1]
+        self.goal_point_index = index_of_farthest_node_that_satisfy_condition + 1
+        print(f"{self.goal_point_index}   {self.goal_points}   {distances}  ")
 
 
 
