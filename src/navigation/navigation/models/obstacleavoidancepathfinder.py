@@ -99,7 +99,7 @@ class ObstacleAvoidancePathFinder:
     def reassess_avoid_obstacle_to_right(self, coordinates, avoid_obstacle_to_right=None):
         if avoid_obstacle_to_right is None:
             avoid_obstacle_to_right = self.avoid_obstacle_to_right
-        if avoid_obstacle_to_right is None:
+        if avoid_obstacle_to_right is None or self.middle is None:
             return None
         tolerance = 0.02  # arbitrary number for floating point errors
         intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
@@ -123,9 +123,9 @@ class ObstacleAvoidancePathFinder:
 
         w = np.linalg.norm(self.current_position - obstacle_intersection)
         d1 = np.linalg.norm(self.current_position - obstacle_point)
-        d2 = np.hypot(d1, obstacle_radius)
+        d2 = np.sqrt(d1*d1 - obstacle_radius*obstacle_radius)
         alpha1 = np.arccos(w/d1)
-        alpha2 = np.arccos(d1/d2)
+        alpha2 = np.arccos(d2/d1)
         new_h = w * math.tan(alpha1 + alpha2)
         return obstacle_intersection + vector * new_h / length(vector)
 

@@ -115,10 +115,12 @@ class GridMapBuilder(Node):
         self.publish_goals_queue = 0
 
         ### EXPLORATION
+        max_num_of_compressed = round(MAX_COMPRESSION_LENGTH // ALGORITHM_RESOLUTION)
         self.bfs = ExplorationEvent(
-            ExploreUnknownMaps(), lambda: self.set_bfs(ExplorationEvent(
-                BfsToDestination((6.64, 2.8)), lambda: self.set_bfs(
-                    ExplorationEvent(BfsToDestination((6.275, -2.225)), lambda: print("FINISHED!"))
+            ExploreUnknownMaps(max_num_of_compressed), lambda: self.set_bfs(ExplorationEvent(
+                BfsToDestination((6.64, 2.8), max_num_of_compressed),
+                lambda: self.set_bfs(
+                    ExplorationEvent(BfsToDestination((6.275, -2.225), max_num_of_compressed), lambda: print("FINISHED!"))
             ))))
 
         self.is_processing = False
@@ -154,7 +156,7 @@ class GridMapBuilder(Node):
 
     def goal_point_redo_bfs(self, *arg):
         print(f"Requested to redo BFS")
-        # self.broadcast_goal(self._resized_map, 100)
+        self.broadcast_goal(self._resized_map, 100)
 
     def redo_bfs_if_blocked(self, msg):
         x1, y1, x2, y2 = msg.data

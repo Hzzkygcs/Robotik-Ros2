@@ -99,8 +99,8 @@ class ExplorationEvent(ExplorationBase):
         return ret
 
 class ExploreUnknownMaps(ExplorationBase):
-    def __init__(self):
-        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
+    def __init__(self, max_num_of_compressed):
+        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD, max_num_of_compressed)
         self.numpyMap = None
         self.canvas = None
         self.currentActualPos = None
@@ -141,8 +141,8 @@ class ExploreUnknownMaps(ExplorationBase):
 
 
 class BfsToDestination(ExplorationBase):
-    def __init__(self, destination_actual_coordinate: tuple):
-        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD)
+    def __init__(self, destination_actual_coordinate: tuple, max_num_of_compressed):
+        self.bfs = DoBfs(self.stoppingCondition, lambda x, y, value: value >= PATH_OBSTACLE_TRESHOLD, max_num_of_compressed)
         self.numpyMap = None
         self.canvas = None
         self.arrived = False
@@ -183,13 +183,14 @@ class BfsToDestination(ExplorationBase):
 
 
 class DoBfs(ExplorationBase):
-    def __init__(self, stopping_condition, wall_condition):
+    def __init__(self, stopping_condition, wall_condition, max_num_of_compressed):
         self.numpyMap = None
         self.currentActualPos = None
         self.shortest_maps = []
         self.routes = collections.deque()
         self.stopping_condition = stopping_condition
         self.wall_condition = wall_condition
+        self.max_num_of_compressed = max_num_of_compressed
 
     def set_map(self, numpyMap: NumpyMap, currentActualPos: tuple, redo_bfs=True):
         self.numpyMap = numpyMap
@@ -207,7 +208,7 @@ class DoBfs(ExplorationBase):
             return False
         self.final_node = final_node  # debugging purpose only
         origin_coord = None
-        for pixel_coord in self.backtrack_routes(final_node):
+        for pixel_coord in self.backtrack_routes(final_node, self.max_num_of_compressed):
             act_x, act_y = self.numpyMap.px_to_actual_rect(pixel_coord).mid
             self.routes.appendleft((act_x, act_y, pixel_coord))
             origin_coord = pixel_coord
@@ -239,19 +240,21 @@ class DoBfs(ExplorationBase):
         self.routes.popleft()
         return self.get_destination()
 
-    def backtrack_routes(self, final_node: NodeInformation):
+    def backtrack_routes(self, final_node: NodeInformation, maximum_compress):
         if final_node is None:
             return
         curr_node = final_node
         last_direction = False
+        num_of_compressed = 0
         while True:
             is_origin_point = (curr_node.shortest_distance == 0)
             if is_origin_point:
                 yield curr_node.x, curr_node.y
                 return
-            if curr_node.direction_to_here != last_direction:
+            if curr_node.direction_to_here != last_direction or num_of_compressed >= maximum_compress:
                 yield curr_node.x, curr_node.y # , curr_node.direction_to_source
                 last_direction = curr_node.direction_to_here
+                num_of_compressed = 0
             backtrack_direction = curr_node.direction_to_source
             dx = DIR_X[backtrack_direction]
             dy = DIR_Y[backtrack_direction]
