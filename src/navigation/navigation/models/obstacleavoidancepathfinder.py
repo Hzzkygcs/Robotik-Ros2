@@ -127,6 +127,7 @@ class ObstacleAvoidancePathFinder:
         alpha1 = np.arccos(w/d1)
         alpha2 = np.arccos(d2/d1)
         new_h = w * math.tan(alpha1 + alpha2)
+        new_h = min(new_h, d1 + 1)  # at most as far as distance toward obstacle + 1
         return obstacle_intersection + vector * new_h / length(vector)
 
     @property

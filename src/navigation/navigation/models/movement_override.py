@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time, math
+
+import numpy as np
 from geometry_msgs.msg import Twist
 
 
@@ -8,10 +10,18 @@ class MovementOverride:
     def __init__(self, end_duration_relative, next_override: MovementOverride=None):
         self.end_duration = int(time.time()) + end_duration_relative
         self.next_override = next_override
+        self.is_valid_override = None
 
     @property
     def is_valid(self):
+        if self.is_valid_override is not None:
+            return self.is_valid_override
         return int(time.time()) < self.end_duration
+
+    @is_valid.setter
+    def is_valid(self, value):
+        self.is_valid_override = value
+
 
     @property
     def twist(self):
@@ -32,18 +42,31 @@ class MovementOverride:
 
 
 class NopMovementOverride(MovementOverride):
-    def __init__(self, _ignored=None, next_override: MovementOverride=None):
+    def __init__(self, _ignored=None, next_override: MovementOverride=None, event_callback=None):
         super().__init__(-1)
+        self.next_override = next_override
+        self.event_callback = event_callback
+
     @property
     def twist(self):
-        return
+        if self.event_callback is not None:
+            self.event_callback()
+            self.event_callback = None
+        return self.next_override.twist if self.next_override is not None else None
 
 DEGREE = 10
-MOVEMENT_SPEED = 2.0
+MOVEMENT_SPEED = 2.5
 
 class BackwardMovementOverride(MovementOverride):
-    def __init__(self, obstacle_on_left: bool, expire_duration=3, speed_multiplier=1, next_override: MovementOverride=None):
+    def __init__(self, obstacle_on_left: bool, get_robot_position, on_obstacle_hit, expire_duration=3, speed_multiplier=1,
+                 next_override: MovementOverride=None):
         super().__init__(expire_duration)
+        self.get_robot_position = get_robot_position
+        self.on_obstacle_hit = on_obstacle_hit
+        self.start_time = time.time()
+        self.previous_position = None
+        self.prev_frame_time = None
+
         self.next_override = next_override
         self.obstacle_at_left = obstacle_on_left
         self.speed_multiplier = speed_multiplier
@@ -52,11 +75,22 @@ class BackwardMovementOverride(MovementOverride):
     def twist(self):
         if not self.is_valid:
             return self._get_twist_of_next_override()
+        curr_pos = self.get_robot_position()
+        if self.previous_position is not None and (time.time() - self.start_time) > 1:
+            dx = self.previous_position.x - curr_pos.x
+            dy = self.previous_position.y - curr_pos.y
+            vel = np.hypot(dx, dy) / (time.time() - self.prev_frame_time)
+            if vel < (MOVEMENT_SPEED * self.speed_multiplier) / 2:
+                self.on_obstacle_hit()
+                self.is_valid = False  # robot is not moving
+        self.previous_position = curr_pos
+        self.prev_frame_time = time.time()
         ret = Twist()
         theta = math.radians(-DEGREE if self.obstacle_at_left else DEGREE) * 3
         ret.linear.y = -MOVEMENT_SPEED * self.speed_multiplier
         ret.angular.z = 2.0 * theta
         return ret
+
 
 
 class ForwardMovementOverride(MovementOverride):

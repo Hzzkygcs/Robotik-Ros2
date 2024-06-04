@@ -255,6 +255,7 @@ class DoBfs(ExplorationBase):
                 yield curr_node.x, curr_node.y # , curr_node.direction_to_source
                 last_direction = curr_node.direction_to_here
                 num_of_compressed = 0
+            num_of_compressed += 1
             backtrack_direction = curr_node.direction_to_source
             dx = DIR_X[backtrack_direction]
             dy = DIR_Y[backtrack_direction]
