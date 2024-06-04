@@ -50,10 +50,6 @@ class GridMapBuilder(Node):
                 depth=1,
                 history=QoSHistoryPolicy.KEEP_LAST
             ))
-        self.publisher_goal_point_reached = self.create_publisher(
-            Empty,
-            '/goal_point/race_finished',
-            2)
         self.subscription_goal_point_reached = self.create_subscription(
             Empty,
             '/goal_point/reached',
@@ -127,14 +123,11 @@ class GridMapBuilder(Node):
             ExploreUnknownMaps(max_num_of_compressed), lambda: self.set_bfs(ExplorationEvent(
                 BfsToDestination((6.64, 2.8), max_num_of_compressed),
                 lambda: self.set_bfs(
-                    ExplorationEvent(BfsToDestination((6.275, -2.225), max_num_of_compressed), self.finished)
+                    ExplorationEvent(BfsToDestination((6.275, -2.225), max_num_of_compressed), lambda: print("FINISHED!"))
             ))))
 
         self.is_processing = False
         # self.load_explored_map()
-    def finished(self):
-        print("FINISHED!")
-        self.publisher_goal_point_reached.publish(Empty())
 
     def load_explored_map(self):  # for debugging purpose only
         with open("explored_map.pkl", "rb") as f:
