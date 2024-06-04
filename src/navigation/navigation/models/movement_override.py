@@ -76,7 +76,7 @@ class BackwardMovementOverride(MovementOverride):
         if not self.is_valid:
             return self._get_twist_of_next_override()
         curr_pos = self.get_robot_position()
-        if self.previous_position is not None and (time.time() - self.start_time) > 1:
+        if self.previous_position is not None and (time.time() - self.start_time) > 0.5:
             dx = self.previous_position.x - curr_pos.x
             dy = self.previous_position.y - curr_pos.y
             vel = np.hypot(dx, dy) / (time.time() - self.prev_frame_time)

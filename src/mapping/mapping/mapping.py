@@ -93,6 +93,7 @@ class GridMapBuilder(Node):
         self._resized_map = None
 
         fig = plt.figure()
+        fig.canvas.manager.set_window_title('Exploration - Mapping')
         ax1 = fig.add_subplot(211)
         size_divider = 3
         fig.set_figheight(20 / size_divider)
@@ -126,7 +127,7 @@ class GridMapBuilder(Node):
             ))))
 
         self.is_processing = False
-        self.load_explored_map()
+        # self.load_explored_map()
 
     def load_explored_map(self):  # for debugging purpose only
         with open("explored_map.pkl", "rb") as f:
@@ -142,7 +143,7 @@ class GridMapBuilder(Node):
             return
         if time.time() < self.start_time + 4:  # do not pause during the first 4 seconds
             return
-        self.pause_mapping = abs(rotation_speed) > math.radians(35)  # max at 20 deg/sec
+        self.pause_mapping = abs(rotation_speed) > math.radians(45)  # max at 20 deg/sec
 
 
     def goal_point_is_reached(self, *msg):

@@ -2,6 +2,7 @@ import math
 import time
 
 import rclpy
+from matplotlib import pyplot as plt
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSHistoryPolicy
 from sensor_msgs.msg import LaserScan
@@ -14,7 +15,7 @@ import numpy as np
 from models.movement_override import BackwardMovementOverride, ForwardMovementOverride, MovementOverride, \
     NopMovementOverride, RotateInPlace
 from src.navigation.navigation.models.obstacleavoidancepathfinder import ObstacleAvoidancePathFinder, \
-    ObstacleAvoidancePathFinderVisualizer
+    ObstacleAvoidancePathFinderVisualizer, CallLimiter
 
 from src.navigation.navigation.models.straightvirtualraycast import StraightVirtualRayCast, \
     StraightVirtualRayCastVisualizer
@@ -88,12 +89,15 @@ class Navigate(Node):
         self.vision_blocked_checker = VisionBlockedChecker(math.radians(10))
         self.obstacle_avoidance_trajectory = ObstacleAvoidancePathFinder()
         self.straight_raycast = StraightVirtualRayCast(OBSTACLE_AVOID_RAYCAST_LENGTH)
-        self.obstacle_avoidance_tracjectory_visualizer = ObstacleAvoidancePathFinderVisualizer(self.obstacle_avoidance_trajectory)
+        fig = plt.figure()
+        fig.canvas.manager.set_window_title('Navigation')
+        self.obstacle_avoidance_tracjectory_visualizer = ObstacleAvoidancePathFinderVisualizer(self.obstacle_avoidance_trajectory, fig=fig)
         self.obstacle_avoidance_tracjectory_visualizer.update_frame()
         self.backward_penalty = 0  # if it reaches certain number, it will not go backward no mater what
         self.laser_scan = LaserScan()
         self.laser_scan_received = False
         self.obstacle_distances: np.ndarray = None
+        self.try_to_skip_visible_goal_points_limited = CallLimiter(self.try_to_skip_visible_goal_points, 0.3)
 
         self.robot_pose = Pose2D()
         self.robot_pose_received = False
@@ -149,11 +153,6 @@ class Navigate(Node):
             return
         curr_pos = np.array([self.robot_pose.x, self.robot_pose.y])
         all_target = np.array(self.goal_points).reshape(-1, 2)
-        # all_target = np.empty((number_of_path_planning, 2))
-        # for i in range(number_of_path_planning):
-        #     x, y = self.get_goal_point(i)
-        #     all_target[i, 0] = x
-        #     all_target[i, 1] = y
 
         line_segment_starts = all_target[0:number_of_path_planning-1, :]
         line_segment_ends = all_target[1:number_of_path_planning, :]
@@ -168,12 +167,25 @@ class Navigate(Node):
             # which is the (i+1)-th index of all_target (because line_segment_ends[i] = all_target[i+1]
             self.goal_point_index = index_of_farthest_node_that_satisfy_condition + 1
         finally:
-            print(f"{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
-            for i in range(self.goal_point_index, all_target.shape[0]):
-                if not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose):
-                    self.goal_point_index = i
+            self.try_to_skip_visible_goal_points(distances)
 
-
+    def try_to_skip_visible_goal_points(self, distances=None):
+        number_of_path_planning = self.goal_points_length
+        if number_of_path_planning < 2:
+            return
+        curr_pos = np.array([self.robot_pose.x, self.robot_pose.y])
+        before = self.goal_point_index
+        all_target = np.array(self.goal_points).reshape(-1, 2)
+        if distances is None:
+            line_segment_starts = all_target[0:number_of_path_planning-1, :]
+            line_segment_ends = all_target[1:number_of_path_planning, :]
+            distances = line_segment_distances(curr_pos, line_segment_starts, line_segment_ends)
+        for i in range(self.goal_point_index, all_target.shape[0]):
+            vision_blocked = not self.vision_blocked_checker.is_vision_blocked(all_target[i, :], self.robot_pose)
+            too_far = np.linalg.norm(all_target[i, :] - curr_pos) > 2*DISTANCE_THRESHOLD_TO_GOAL
+            if vision_blocked and not too_far:
+                self.goal_point_index = i
+        print(f"{before}->{self.goal_point_index}   {curr_pos}   {np.array(self.goal_points).reshape(-1, 2).round(1)}   {distances}  ")
 
 
     def get_goal_point(self, index):
@@ -252,7 +264,7 @@ class Navigate(Node):
             BackwardMovementOverride(obstacle_left, lambda: self.robot_pose, penalty,
                                      expire_duration:= expire_duration + 1, speed_multiplier=0.6),
             NopMovementOverride(event_callback=on_done_callback),
-            self._get_rotate_in_place(-10),
+            # self._get_rotate_in_place(-10),
 
             # ForwardMovementOverride(lambda: not obstacle_left, 0.2, expire_duration:= expire_duration + 1.5),
             # ForwardMovementOverride(goal_is_in_left_func, 1, expire_duration:= expire_duration + 0.5),
@@ -308,6 +320,7 @@ class Navigate(Node):
             self.publisher_cmd_vel.publish(Twist())
             self.next_goal_point()
             return
+        self.try_to_skip_visible_goal_points_limited((), None)
 
         goal_angle_deg = math.degrees(self.goal_angle())
         if abs(goal_angle_deg) > MAX_ANGLE_DEGREE_TOWARD_GOAL:

@@ -70,11 +70,21 @@ class ObstacleAvoidancePathFinder:
             right_index = index[0][0]  # (right = negative angles = lower/first index)
             left_index = index[0][-1]  # in perspective of robot's POV (left = positive angles = higher/last index)
 
+
             if avoid_obstacle_to_right is None:
                 avoid_obstacle_to_right = intersection_distance[right_index] < intersection_distance[left_index]
-            shortest_index = right_index if avoid_obstacle_to_right else left_index
-            middle_candidate = self._calculate_middle_point(coordinates[shortest_index], intersection_points[shortest_index],
-                                                            avoid_obstacle_to_right)
+                left_mid_candidate = self._calculate_middle_point(coordinates[left_index], intersection_points[left_index],
+                                                                False)
+                right_mid_candidate = self._calculate_middle_point(coordinates[right_index], intersection_points[right_index],
+                                                                True)
+                left_mid_obst_dist = self._get_closest_obstacle(coordinates, left_mid_candidate)
+                right_mid_obst_dist = self._get_closest_obstacle(coordinates, right_mid_candidate)
+                avoid_obstacle_to_right = right_mid_obst_dist > left_mid_obst_dist
+                middle_candidate =  right_mid_candidate if avoid_obstacle_to_right else left_mid_candidate
+            else:
+                shortest_index = right_index if avoid_obstacle_to_right else left_index
+                middle_candidate = self._calculate_middle_point(coordinates[shortest_index], intersection_points[shortest_index],
+                                                                avoid_obstacle_to_right)
             distance_toward_middle_point = np.linalg.norm(middle_candidate)
             if distance_toward_middle_point < minimum_length:
                 self.middle = middle_candidate
@@ -102,15 +112,25 @@ class ObstacleAvoidancePathFinder:
         if avoid_obstacle_to_right is None or self.middle is None:
             return None
         tolerance = 0.02  # arbitrary number for floating point errors
-        intersection_distance, _ = pnt2line(coordinates, self.current_position, self.middle)
-        mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance).any()
-        intersection_distance, _ = pnt2line(coordinates, self.middle, self.goal_point)
-        mid_pnt_collides_obstacle = mid_pnt_collides_obstacle or (intersection_distance < self.robot_radius//2 - tolerance).any()
+
+        intersection_distance, _ = self._get_closest_obstacle(coordinates, self.middle)
+        mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance)
         if mid_pnt_collides_obstacle.any():
             print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
                   f"with other obstacle. Choosing the other side...")
             avoid_obstacle_to_right = not avoid_obstacle_to_right  # choose the other way around
         return avoid_obstacle_to_right
+
+    def _get_closest_obstacle(self, coordinates, middle):
+        intersection_distance1, _ = pnt2line(coordinates, self.current_position, middle)
+        intersection_distance1_min = intersection_distance1.argmin()
+
+        intersection_distance2, _ = pnt2line(coordinates, middle, self.goal_point)
+        intersection_distance2_min = intersection_distance2.argmin()
+        if intersection_distance1[intersection_distance1_min] < intersection_distance2[intersection_distance2_min]:
+            return  intersection_distance1[intersection_distance1_min], intersection_distance1_min
+        return  intersection_distance2[intersection_distance2_min], intersection_distance2_min
+
 
     def _calculate_middle_point(self, obstacle_point, obstacle_intersection_with_start_and_goal, avoid_to_right):
         obstacle_radius = self.robot_radius
@@ -127,7 +147,7 @@ class ObstacleAvoidancePathFinder:
         alpha1 = np.arccos(w/d1)
         alpha2 = np.arccos(d2/d1)
         new_h = w * math.tan(alpha1 + alpha2)
-        new_h = min(new_h, d1 + 1)  # at most as far as distance toward obstacle + 1
+        new_h = min(new_h, d1)  # at most as far as distance toward obstacle + 1
         return obstacle_intersection + vector * new_h / length(vector)
 
     @property
