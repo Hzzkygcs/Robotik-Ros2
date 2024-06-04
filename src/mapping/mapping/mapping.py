@@ -1,5 +1,7 @@
 import itertools
 import math
+import os
+import pickle
 import warnings
 
 import matplotlib.pyplot as plt
@@ -124,6 +126,12 @@ class GridMapBuilder(Node):
             ))))
 
         self.is_processing = False
+        self.load_explored_map()
+
+    def load_explored_map(self):  # for debugging purpose only
+        with open("explored_map.pkl", "rb") as f:
+            self.map = pickle.load(f)
+
 
     def set_bfs(self, new_bfs):
         self.bfs = new_bfs
@@ -214,8 +222,8 @@ class GridMapBuilder(Node):
         self._resized_map = self.map.resize_dilated_but_efficient(ALGORITHM_RESOLUTION)
 
         self.map_for_bfs.canvas = dilation(self.map_for_bfs.canvas)
-        self.displayer_abstract.set_new_map(self.map_for_bfs).update_frame()
-        self.displayer.update_frame()
+        self.displayer_abstract.set_new_map(self.map_for_bfs)
+        self.displayer.set_new_map(self.map)
 
 
         self.broadcast_goal(self._resized_map)

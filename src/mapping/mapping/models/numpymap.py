@@ -206,6 +206,7 @@ class NumpyMapDisplayer:
         # if self.map.route is not None:
         #     copied_canvas = display_route_on_canvas(copied_canvas, self.map)
 
+        # copied_canvas = numpy_blur(copied_canvas)
         self._canvas_axes.set_data(copied_canvas)
         plt.pause(0.001)
         self.fig.canvas.draw()
@@ -227,6 +228,16 @@ class NumpyMapDisplayer:
             px_x, px_y = self.map.actual_to_px((act_x, act_y))
             cv2.line(copied_canvas, (prev_px_x,prev_px_y),(px_x, px_y), (0, 122, 255), thickness=6)
             cv2.circle(copied_canvas, (px_x, px_y), 2, (0, 255, 0), thickness=10)
+
+
+def numpy_blur(data):
+    # Define the standard deviation for the Gaussian kernel
+    sigma = 1.0
+    kernel_size = (int(2 * np.ceil(3 * sigma) + 1), int(2 * np.ceil(3 * sigma) + 1))
+
+    # Apply Gaussian blur to the 2D image with 3 channels
+    return cv2.GaussianBlur(data, kernel_size, sigma)
+
 
 
 
