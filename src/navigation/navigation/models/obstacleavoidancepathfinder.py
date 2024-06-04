@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 
 # in coppeliasim measurement unit
 ROBOT_RADIUS = 0.32
-
+tolerance = 0.02  # arbitrary number for floating point errors
 
 
 class ObstacleAvoidancePathFinder:
@@ -28,6 +28,7 @@ class ObstacleAvoidancePathFinder:
 
         self.distance_of_being_avoided_obstacle = 0
         self.avoid_obstacle_to_right = None
+        self.h_multiplier = 1
         self.distance_difference_threshold_for_different_obj = 1
 
     @property
@@ -61,6 +62,8 @@ class ObstacleAvoidancePathFinder:
         self.groups = groups
         avoid_obstacle_to_right = self.avoid_obstacle_to_right
 
+        if (self.current_position - self.goal_point < 0.1).all():
+            return
         intersection_distance, intersection_points = pnt2line(coordinates, self.current_position, self.goal_point)
         candidate_groups = np.unique(groups[intersection_distance < self.robot_radius])
         minimum_length = float('inf')
@@ -72,19 +75,24 @@ class ObstacleAvoidancePathFinder:
 
 
             if avoid_obstacle_to_right is None:
-                avoid_obstacle_to_right = intersection_distance[right_index] < intersection_distance[left_index]
-                left_mid_candidate = self._calculate_middle_point(coordinates[left_index], intersection_points[left_index],
-                                                                False)
-                right_mid_candidate = self._calculate_middle_point(coordinates[right_index], intersection_points[right_index],
-                                                                True)
-                left_mid_obst_dist = self._get_closest_obstacle(coordinates, left_mid_candidate)
-                right_mid_obst_dist = self._get_closest_obstacle(coordinates, right_mid_candidate)
-                avoid_obstacle_to_right = right_mid_obst_dist > left_mid_obst_dist
-                middle_candidate =  right_mid_candidate if avoid_obstacle_to_right else left_mid_candidate
+                middle_candidate, avoid_obstacle_to_right, min_distance = self.try_both_left_right_candidate(
+                    coordinates, intersection_points, left_index, right_index, 1)
+                n = 4
+                self.h_multiplier = 1
+                for i in range(n):
+                    if min_distance >= self.robot_radius/2 - tolerance:
+                        break
+                    self.h_multiplier -= 1/n
+                    middle_candidate = self._calculate_middle_point(coordinates[right_index], intersection_points[right_index],
+                                                                       avoid_obstacle_to_right, self.h_multiplier)
+                    min_distance,_ = self._get_closest_obstacle(coordinates, middle_candidate)
+                    print(f"H-MULTIPLIER: {self.h_multiplier}")
+                middle_candidate, avoid_obstacle_to_right, min_distance = self.try_both_left_right_candidate(
+                    coordinates, intersection_points, left_index, right_index, self.h_multiplier)
             else:
                 shortest_index = right_index if avoid_obstacle_to_right else left_index
                 middle_candidate = self._calculate_middle_point(coordinates[shortest_index], intersection_points[shortest_index],
-                                                                avoid_obstacle_to_right)
+                                                                avoid_obstacle_to_right, self.h_multiplier)
             distance_toward_middle_point = np.linalg.norm(middle_candidate)
             if distance_toward_middle_point < minimum_length:
                 self.middle = middle_candidate
@@ -92,29 +100,41 @@ class ObstacleAvoidancePathFinder:
                 selected_group = group
 
         # self.avoid_obstacle_to_right is None check so that this code will be run only once in a while
-        if self.middle is not None and self.avoid_obstacle_to_right is None:
-            avoid_obstacle_to_right = self.reassess_avoid_obstacle_to_right(coordinates)
-        else:
-            avoid_obstacle_to_right  =self.reassess_avoid_obstacle_to_right_caller((coordinates,), avoid_obstacle_to_right)
+        # if self.middle is not None and self.avoid_obstacle_to_right is None:
+        #     avoid_obstacle_to_right = self.reassess_avoid_obstacle_to_right(coordinates)
+        # else:
+        #     avoid_obstacle_to_right  =self.reassess_avoid_obstacle_to_right_caller((coordinates,), avoid_obstacle_to_right)
         self.avoid_obstacle_to_right = avoid_obstacle_to_right
 
-        if selected_group is not None:
+        if selected_group is not None:   # ================== CHECK IF OBSTACLE CHANGES ==================
             index = np.where(groups == selected_group)
             right_index = index[0][0]
             distance = self._distances[right_index]
             if abs(self.distance_of_being_avoided_obstacle-distance) > self.distance_difference_threshold_for_different_obj:
                 self.avoid_obstacle_to_right = None  # reset preference
+                self.h_multiplier = 1
             self.distance_of_being_avoided_obstacle = distance
+
+    def try_both_left_right_candidate(self, coordinates, intersection_points, left_index, right_index, h_multiplier):
+        left_mid_candidate = self._calculate_middle_point(coordinates[left_index], intersection_points[left_index],
+                                                          False, h_multiplier)
+        right_mid_candidate = self._calculate_middle_point(coordinates[right_index], intersection_points[right_index],
+                                                           True, h_multiplier)
+        left_mid_obst_dist,_ = self._get_closest_obstacle(coordinates, left_mid_candidate)
+        right_mid_obst_dist,_ = self._get_closest_obstacle(coordinates, right_mid_candidate)
+        avoid_obstacle_to_right = right_mid_obst_dist > left_mid_obst_dist
+        middle_candidate =  right_mid_candidate if avoid_obstacle_to_right else left_mid_candidate
+        return middle_candidate, avoid_obstacle_to_right, min(left_mid_obst_dist, right_mid_obst_dist)
+
 
     def reassess_avoid_obstacle_to_right(self, coordinates, avoid_obstacle_to_right=None):
         if avoid_obstacle_to_right is None:
             avoid_obstacle_to_right = self.avoid_obstacle_to_right
         if avoid_obstacle_to_right is None or self.middle is None:
             return None
-        tolerance = 0.02  # arbitrary number for floating point errors
 
         intersection_distance, _ = self._get_closest_obstacle(coordinates, self.middle)
-        mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius//2 - tolerance)
+        mid_pnt_collides_obstacle = (intersection_distance < self.robot_radius/2 - tolerance)
         if mid_pnt_collides_obstacle.any():
             print(f"Choosen middle point ({['left', 'right'][avoid_obstacle_to_right]}) will collide "
                   f"with other obstacle. Choosing the other side...")
@@ -132,9 +152,11 @@ class ObstacleAvoidancePathFinder:
         return  intersection_distance2[intersection_distance2_min], intersection_distance2_min
 
 
-    def _calculate_middle_point(self, obstacle_point, obstacle_intersection_with_start_and_goal, avoid_to_right):
+    def _calculate_middle_point(self, obstacle_point, obstacle_intersection_with_start_and_goal, avoid_to_right, h_new_multiplier=1):
         obstacle_radius = self.robot_radius
         obstacle_intersection = obstacle_intersection_with_start_and_goal
+        if h_new_multiplier <= 0:
+            return self.unpacked_goal_point
 
         if xor(avoid_to_right, is_ccw((0,0), self.unpacked_goal_point, obstacle_point)):
             vector = obstacle_point - obstacle_intersection
@@ -147,7 +169,7 @@ class ObstacleAvoidancePathFinder:
         alpha1 = np.arccos(w/d1)
         alpha2 = np.arccos(d2/d1)
         new_h = w * math.tan(alpha1 + alpha2)
-        new_h = min(new_h, d1)  # at most as far as distance toward obstacle + 1
+        new_h = min(new_h, d1)*h_new_multiplier  # at most as far as distance toward obstacle + 1
         return obstacle_intersection + vector * new_h / length(vector)
 
     @property

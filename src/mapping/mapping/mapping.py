@@ -143,7 +143,7 @@ class GridMapBuilder(Node):
             return
         if time.time() < self.start_time + 4:  # do not pause during the first 4 seconds
             return
-        self.pause_mapping = abs(rotation_speed) > math.radians(45)  # max at 20 deg/sec
+        self.pause_mapping = abs(rotation_speed) > math.radians(50)  # max at 20 deg/sec
 
 
     def goal_point_is_reached(self, *msg):
