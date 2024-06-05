@@ -136,7 +136,7 @@ class ObstacleAvoidancePathFinder:
         obstacle_radius = self.robot_radius
         obstacle_intersection = obstacle_intersection_with_start_and_goal
 
-        if xor(avoid_to_right, is_ccw((0,0), self.unpacked_goal_point, obstacle_point)):
+        if xor(avoid_to_right, is_ccw((0,0), self.unpacked_goal_point, obstacle_point)):  # determine the value of S
             vector = obstacle_point - obstacle_intersection
         else:
             vector = obstacle_intersection - obstacle_point
